@@ -11,30 +11,38 @@ class LogQuantizedTensor:
     s: torch.Tensor # sign of the original?
     r: Optional[torch.tensor]
 
-    # q2: torch.Tensor
+    q2: torch.Tensor
     # b: torch.Tensor # row wise max
-    # s2: torch.Tensor # sign of the original?
+    s_err: torch.Tensor # sign of the original?
     # r: Optional[torch.tensor]
 
-    def __init__(self, q1, a, s, r=None) -> None:
+    def __init__(self, q1, a, s, q2, s_err, r=None) -> None:
         self.q1 = q1
         self.a = a
         self.s = s
         self.r = r
+
+        self.q2 = q2
+        self.s_err = s_err
 
     def dequantize(self) -> torch.Tensor:
         if self.r is not None:
             return self.r
         else:
             eps = 1e-8
-            # return self.s * self.a * torch.maximum((2.0 ** (-self.q1)), torch.tensor(eps))
-            return self.s * self.a.view(*self.a.shape, *([1] * (self.q1.dim() - self.a.dim()))) * torch.maximum((2.0 ** (-self.q1)), torch.tensor(eps))
+            prim = self.s * self.a.view(*self.a.shape, *([1] * (self.q1.dim() - self.a.dim()))) * torch.maximum((2.0 ** (-self.q1)), torch.tensor(eps))
+            if self.q2 is not None and self.s_err is not None:
+                second = self.s_err * self.a.view(*self.a.shape, *([1] * (self.q2.dim() - self.a.dim()))) * torch.maximum((2.0 ** (-self.q2)), torch.tensor(eps))
+                return prim + second
+            return prim
 
         
     def map(self, func):
         return LogQuantizedTensor(
             func(self.q1),
             self.a, self.s,
+            None if self.q2 is None else func(self.q2),
+            None if self.s_err is None else func(self.s_err),
             None if self.r is None else func(self.r)
         )
 
@@ -80,9 +88,12 @@ class LogQuantizedOperator(nn.Module):
         
     def quantize_log_output(self, output: torch.Tensor):
         assert self.num_batches_tracked >= 1
+
+        threshold = 10000000
         
         # Get scale (maximum absolute value)
         a = self.running_max_abs
+        
         
         # Get signs
         s = torch.sign(output)
@@ -95,8 +106,20 @@ class LogQuantizedOperator(nn.Module):
         
         # Clamp to int8 range and round
         q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
+
+        err = (output / a + eps) - (2 ** -q1)
+
+        q2 = None
+        s_err = None
+        if torch.any(torch.abs(err) > threshold):
+
+            s_err = torch.sign(err)
+            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+            normalized_err = torch.abs(err) / a + eps
+            q2 = -torch.log2(normalized_err)
+            q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
         
-        return LogQuantizedTensor(q1, a, s)
+        return LogQuantizedTensor(q1, a, s, q2, s_err)
 
 
 
@@ -161,7 +184,6 @@ class LogQuantizedConv2dBatchNorm2dReLU(LogQuantizedOperator):
             var = self.bn2d.running_var
         return mean, var
 
-    #WHY IS THERE FUSED BIAS EXPLAIN THIS PART
     def _get_fused_weight_and_bias(self, input):
         mean, var = self._get_bn2d_mean_and_var(input)
         sqrt_var = torch.sqrt(var + self.bn2d.eps)
@@ -178,8 +200,10 @@ class LogQuantizedConv2dBatchNorm2dReLU(LogQuantizedOperator):
     def _quantize_weight(self, weight: torch.Tensor):
     
         # For convolutional weights, shape is [out_channels, in_channels, kernel_height, kernel_width]
-        weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, in_channels*kh*kw]
+        threshold = 10000000
         
+        weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, in_channels*kh*kw]
+
         # Get sign tensor - this should match the shape of q1 tensor
         s = torch.sign(weight)
         s = torch.where(s == 0, torch.ones_like(s), s)
@@ -196,8 +220,18 @@ class LogQuantizedConv2dBatchNorm2dReLU(LogQuantizedOperator):
         
         # Clamp to int8 range and round
         q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
+
+        err = (weight / a + eps) - (2 ** -q1)
+        q2 = None
+        s_err = None
+        if torch.any(torch.abs(err) > threshold):
+            s_err = torch.sign(err)
+            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+            normalized_err = torch.abs(err) / a + eps
+            q2 = -torch.log2(normalized_err)
+            q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
         
-        return LogQuantizedTensor(q1, a.squeeze(), s)
+        return LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err)
 
     
 
@@ -300,7 +334,20 @@ class LogQuantizedAdaptiveAvgPool2d(LogQuantizedOperator):
             normalized = torch.abs(pooled) / a + eps
             q1 = -torch.log2(normalized)
             q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
-            quantized_simulated_output = LogQuantizedTensor(q1, a, s)
+
+            threshold = 10000000
+            err = (pooled / a + eps) - (2 ** -q1)
+            q2 = None
+            s_err = None
+            if torch.any(torch.abs(err) > threshold):
+
+                s_err = torch.sign(err)
+                s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+                normalized_err = torch.abs(err) / a + eps
+                q2 = -torch.log2(normalized_err)
+                q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
+            
+            quantized_simulated_output = LogQuantizedTensor(q1, a, s, q2, s_err)
 
         real_output = F.adaptive_avg_pool2d(input.dequantize(), self.output_size)
         quantized_simulated_output.r = real_output - \
@@ -340,7 +387,21 @@ class LogQuantizedMaxPool2d(LogQuantizedOperator):
             normalized = torch.abs(max_pooled) / a + eps
             q1 = -torch.log2(normalized)
             q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
-            quantized_simulated_output = LogQuantizedTensor(q1, a, s)
+
+            threshold = 10000000
+            err = (max_pooled / a + eps) - (2 ** -q1)
+            q2 = None
+            s_err = None
+            if torch.any(torch.abs(err) > threshold):
+
+                s_err = torch.sign(err)
+                s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+                normalized_err = torch.abs(err) / a + eps
+                q2 = -torch.log2(normalized_err)
+                q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
+
+            
+            quantized_simulated_output = LogQuantizedTensor(q1, a, s, q2, s_err)
         real_output = F.max_pool2d(input.dequantize(), self.kernel_size, self.stride, 
                                       self.padding, self.dilation)
         
@@ -382,7 +443,7 @@ class LogQuantizedReLU(LogQuantizedOperator):
             return output
     
 # difference between scale per tensor and scale per weight
-#FUCK FORGOT TO ADD CLAMPING
+
 class LogQuantizedLinear(LogQuantizedOperator):
     def __init__(self, in_features: int, out_features: int, bias: bool = True, momentum=0.1, device=None) -> None:
         super().__init__(momentum, device)
@@ -400,8 +461,20 @@ class LogQuantizedLinear(LogQuantizedOperator):
         q1 = -torch.log2(normalized)
     
         q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
+
+        threshold = 10000000
+        err = (weight / a + eps) - (2 ** -q1)
+        q2 = None
+        s_err = None
+        if torch.any(torch.abs(err) > threshold):
+
+            s_err = torch.sign(err)
+            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+            normalized_err = torch.abs(err) / a + eps
+            q2 = -torch.log2(normalized_err)
+            q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
     
-        return LogQuantizedTensor(q1, a, s)
+        return LogQuantizedTensor(q1, a, s, q2, s_err)
 
         
     def _quantize_bias(self, quantized_input: LogQuantizedTensor, quantized_weight: LogQuantizedTensor, bias: torch.Tensor):
@@ -446,11 +519,14 @@ class LogQuantizedFlatten(LogQuantizedOperator):
             assert isinstance(input, LogQuantizedTensor)
             q1 = torch.flatten(input.q1, self.start_dim, self.end_dim)
             r = torch.flatten(input.r, self.start_dim, self.end_dim)
-            return LogQuantizedTensor(q1, input.a, input.s, r)
+            if input.q2 is not None:
+                q2 =  torch.flatten(input.q2, self.start_dim, self.end_dim)
+            else:
+                q2 = None
+            return LogQuantizedTensor(q1, input.a, input.s, q2, input.s_err, r)
         else:
             assert isinstance(input, torch.Tensor)
             return torch.flatten(input, self.start_dim, self.end_dim)
-
 
 
 
