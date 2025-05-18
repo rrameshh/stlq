@@ -1,3 +1,5 @@
+# log_ops.py
+
 from typing import Optional, Union
 
 import torch
@@ -5,15 +7,34 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 
+class LogQuantConfig:
+    """Configuration class for log quantization parameters."""
+    
+    def __init__(
+        self,
+        momentum: float = 0.1,
+        threshold: float = 1e-5, 
+        eps: float = 1e-8,
+        bits: int = 8,
+        device = None
+    ):
+        self.momentum = momentum
+        self.threshold = threshold
+        self.eps = eps
+        self.bits = bits
+        self.max_value = (2 ** bits) - 1  # For int8, this is 255
+        self.device = device
+
+
 class LogQuantizedTensor:
     q1: torch.Tensor
-    a: torch.Tensor # row wise max
-    s: torch.Tensor # sign of the original?
+    a: torch.Tensor  # row wise max
+    s: torch.Tensor  # sign of the original?
     r: Optional[torch.tensor]
 
     q2: torch.Tensor
     # b: torch.Tensor # row wise max
-    s_err: torch.Tensor # sign of the original?
+    s_err: torch.Tensor  # sign of the original?
     # r: Optional[torch.tensor]
 
     def __init__(self, q1, a, s, q2, s_err, r=None) -> None:
@@ -55,19 +76,135 @@ class LogQuantizedTensor:
     @property
     def shape(self):
         return self.q1.shape
+
+
+# Utility functions for quantization
+class LogQuantUtils:
+    """Utility functions for log quantization operations."""
     
+    @staticmethod
+    def quantize_tensor(
+        tensor: torch.Tensor,
+        scale: torch.Tensor,
+        config: LogQuantConfig
+    ) -> LogQuantizedTensor:
+        """Quantize a tensor using log quantization."""
+        # Get signs
+        s = torch.sign(tensor)
+        s = torch.where(s == 0, torch.ones_like(s), s)
+        
+        # Compute exponents with small epsilon to avoid log(0)
+        normalized = torch.abs(tensor) / scale + config.eps
+        q1 = -torch.log2(normalized)
+        
+        # Clamp to int range and round
+        q1 = torch.clamp(q1.round(), 0, config.max_value).to(torch.int8)
+
+        # Calculate residual error
+        err = (tensor / scale + config.eps) - (2 ** -q1)
+
+        # Conditionally create second-order quantization based on threshold
+        q2 = None
+        s_err = None
+        if torch.any(torch.abs(err) > config.threshold):
+            s_err = torch.sign(err)
+            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+            
+            normalized_err = torch.abs(err) / scale + config.eps
+            q2 = -torch.log2(normalized_err)
+            q2 = torch.clamp(q2.round(), 0, config.max_value).to(torch.int8)
+        
+        return LogQuantizedTensor(q1, scale, s, q2, s_err)
+    
+    @staticmethod
+    def quantize_weight(
+        weight: torch.Tensor,
+        config: LogQuantConfig,
+        per_channel: bool = True
+    ) -> LogQuantizedTensor:
+        """Quantize weights using per-channel or per-tensor scaling."""
+        if per_channel:
+            # Reshape for per-channel scaling
+            weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, rest]
+            
+            # Get max absolute value per output channel
+            a = weight_reshaped.abs().max(dim=1).values  # [out_channels]
+            a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
+            
+            # Reshape a for broadcasting
+            a_view = a.view(a.shape[0], *([1] * (weight.dim() - 1)))
+            
+            # Get sign tensor
+            s = torch.sign(weight)
+            s = torch.where(s == 0, torch.ones_like(s), s)
+        
+            # Compute exponents
+            normalized = torch.abs(weight) / a_view + config.eps
+            q1 = -torch.log2(normalized)
+            
+            # Clamp to int8 range and round
+            q1 = torch.clamp(q1.round(), 0, config.max_value).to(torch.int8)
+
+            # Calculate residual error
+            err = (weight / a_view + config.eps) - (2 ** -q1)
+        else:
+            # Per-tensor scaling
+            a = weight.abs().max()
+            a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
+            
+            # Get sign tensor
+            s = torch.sign(weight)
+            s = torch.where(s == 0, torch.ones_like(s), s)
+        
+            # Compute exponents
+            normalized = torch.abs(weight) / a + config.eps
+            q1 = -torch.log2(normalized)
+            
+            # Clamp to int8 range and round
+            q1 = torch.clamp(q1.round(), 0, config.max_value).to(torch.int8)
+
+            # Calculate residual error
+            err = (weight / a + config.eps) - (2 ** -q1)
+
+        # Conditionally create second-order quantization based on threshold
+        q2 = None
+        s_err = None
+        if torch.any(torch.abs(err) > config.threshold):
+            s_err = torch.sign(err)
+            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
+            
+            if per_channel:
+                normalized_err = torch.abs(err) / a_view + config.eps
+            else:
+                normalized_err = torch.abs(err) / a + config.eps
+                
+            q2 = -torch.log2(normalized_err)
+            q2 = torch.clamp(q2.round(), 0, config.max_value).to(torch.int8)
+        
+        return LogQuantizedTensor(q1, a if not per_channel else a.squeeze(), s, q2, s_err)
 
 
 class LogQuantizedOperator(nn.Module):
-    def __init__(self, momentum=0.1, device=None) -> None:
+    def __init__(self, config=None, device=None) -> None:
         super().__init__()
-        self.activation_quantization = False
-        self.momentum = momentum
         
-        # only need to track max absolute values
-        self.register_buffer('running_max_abs', torch.ones(1, device=device) * 1e-8)
-        self.register_buffer('num_batches_tracked',
-                            torch.tensor(0, dtype=torch.long, device=device))
+        # Create config if not provided
+        if config is None:
+            self.config = LogQuantConfig(device=device)
+        else:
+            self.config = config
+            
+        self.activation_quantization = False
+        
+        # Register buffers for tracking statistics
+        self.register_buffer(
+            'running_max_abs', 
+            torch.ones(1, device=self.config.device) * self.config.eps
+        )
+        self.register_buffer(
+            'num_batches_tracked',
+            torch.tensor(0, dtype=torch.long, device=self.config.device)
+        )
                             
     def update_max_abs_stats(self, output: torch.Tensor):
         if not self.training:
@@ -75,59 +212,30 @@ class LogQuantizedOperator(nn.Module):
             
         # For log quantization, we only need maximum absolute value
         max_abs = output.abs().max()
-        max_abs = torch.maximum(max_abs, torch.tensor(1e-8))
+        max_abs = torch.maximum(max_abs, torch.tensor(self.config.eps, device=output.device))
         
         # Update running stats with momentum
         if self.num_batches_tracked == 0:
             self.running_max_abs.data.copy_(max_abs)
         else:
             self.running_max_abs.data.copy_(
-                max_abs * self.momentum + self.running_max_abs * (1 - self.momentum))
+                max_abs * self.config.momentum + 
+                self.running_max_abs * (1 - self.config.momentum)
+            )
                 
         self.num_batches_tracked.data.copy_(self.num_batches_tracked + 1)
         
     def quantize_log_output(self, output: torch.Tensor):
         assert self.num_batches_tracked >= 1
-
-        threshold = 10000000
         
-        # Get scale (maximum absolute value)
-        a = self.running_max_abs
-        
-        
-        # Get signs
-        s = torch.sign(output)
-        s = torch.where(s == 0, torch.ones_like(s), s)
-        
-        # Compute exponents (with small epsilon to avoid log(0))
-        eps = 1e-8
-        normalized = torch.abs(output) / a + eps
-        q1 = -torch.log2(normalized) 
-        
-        # Clamp to int8 range and round
-        q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
-
-        err = (output / a + eps) - (2 ** -q1)
-
-        q2 = None
-        s_err = None
-        if torch.any(torch.abs(err) > threshold):
-
-            s_err = torch.sign(err)
-            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
-            normalized_err = torch.abs(err) / a + eps
-            q2 = -torch.log2(normalized_err)
-            q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
-        
-        return LogQuantizedTensor(q1, a, s, q2, s_err)
-
+        return LogQuantUtils.quantize_tensor(output, self.running_max_abs, self.config)
 
 
 class LogQuantize(LogQuantizedOperator):
-    def __init__(self, momentum=0.1, device=None) -> None:
-        super().__init__(momentum, device)
+    def __init__(self, config=None, device=None) -> None:
+        super().__init__(config, device)
 
-    def forward(self, input: torch.Tensor) -> LogQuantizedTensor:
+    def forward(self, input: torch.Tensor) -> Union[torch.Tensor, LogQuantizedTensor]:
         if self.activation_quantization:
             self.update_max_abs_stats(input)
             output = self.quantize_log_output(input)
@@ -150,16 +258,16 @@ class LogQuantizedConv2dBatchNorm2dReLU(LogQuantizedOperator):
         bias=True,
         padding_mode='zeros',
         activation=None,
-        momentum=0.1,
+        config=None,
         device=None
     ):
-        super().__init__(momentum, device)
+        super().__init__(config, device)
         self.conv2d = nn.Conv2d(
             in_channels, out_channels, kernel_size,
             stride, padding, dilation,
-            groups, bias, padding_mode, device
+            groups, bias, padding_mode, device=self.config.device
         )
-        self.bn2d = nn.BatchNorm2d(out_channels, device=device)
+        self.bn2d = nn.BatchNorm2d(out_channels, device=self.config.device)
 
         assert self.conv2d.padding_mode == "zeros"
 
@@ -196,49 +304,12 @@ class LogQuantizedConv2dBatchNorm2dReLU(LogQuantizedOperator):
         return fused_weight, fused_bias
     
 
-    #IMPORTANT FUNCTION
     def _quantize_weight(self, weight: torch.Tensor):
-    
-        # For convolutional weights, shape is [out_channels, in_channels, kernel_height, kernel_width]
-        threshold = 10000000
-        
-        weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, in_channels*kh*kw]
+        # Use the utility function for weight quantization
+        return LogQuantUtils.quantize_weight(weight, self.config, per_channel=True)
 
-        # Get sign tensor - this should match the shape of q1 tensor
-        s = torch.sign(weight)
-        s = torch.where(s == 0, torch.ones_like(s), s)
-    
-        # Get max absolute value per output channel
-        a = weight_reshaped.abs().max(dim=1).values  # [out_channels]
-        
-        # Reshape a to make broadcasting work later
-        a = a.view(a.shape[0], *([1] * (weight.dim() - 1)))  # [out_channels, 1, 1, 1] for 2D conv
-        
-        eps = 1e-8
-        normalized = torch.abs(weight) / a + eps
-        q1 = -torch.log2(normalized)
-        
-        # Clamp to int8 range and round
-        q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
-
-        err = (weight / a + eps) - (2 ** -q1)
-        q2 = None
-        s_err = None
-        if torch.any(torch.abs(err) > threshold):
-            s_err = torch.sign(err)
-            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
-            normalized_err = torch.abs(err) / a + eps
-            q2 = -torch.log2(normalized_err)
-            q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
-        
-        return LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err)
-
-    
-
-
-    def _quantize_bias(self, quantized_input: LogQuantizedTensor, quantized_weight: LogQuantizedTensor, bias: torch.Tensor):
+    def _quantize_bias(self, quantized_input, quantized_weight, bias):
         return bias
-
        
     def _activation_quantized_forward(self, input: LogQuantizedTensor) -> LogQuantizedTensor:
         with torch.no_grad():
@@ -290,8 +361,8 @@ class LogQuantizedConv2dBatchNorm2dReLU(LogQuantizedOperator):
 
 
 class LogQuantizedAdd(LogQuantizedOperator):
-    def __init__(self, momentum=0.1, device=None) -> None:
-        super().__init__(momentum, device)
+    def __init__(self, config=None, device=None) -> None:
+        super().__init__(config, device)
 
     def forward(self, x, y):
         if self.activation_quantization:
@@ -318,36 +389,36 @@ class LogQuantizedAdd(LogQuantizedOperator):
         
 
 class LogQuantizedAdaptiveAvgPool2d(LogQuantizedOperator):
-    def __init__(self, output_size) -> None:
-        super().__init__(0.1, None)
+    def __init__(self, output_size, config=None, device=None) -> None:
+        super().__init__(config, device)
         self.output_size = output_size
 
     def _activation_quantized_forward(self, input: LogQuantizedTensor) -> LogQuantizedTensor:
         with torch.no_grad():
             input_dequant = input.dequantize()
             pooled = F.adaptive_avg_pool2d(input_dequant, self.output_size)
+            
+            # Use the config threshold instead of hardcoded value
+            scale = torch.maximum(pooled.abs().max(), torch.tensor(self.config.eps, device=pooled.device))
             s = torch.sign(pooled)
-            max_abs = pooled.abs().max()
-            a = torch.maximum(max_abs, torch.tensor(8))
+            s = torch.where(s == 0, torch.ones_like(s), s)
 
-            eps = 1e-8
-            normalized = torch.abs(pooled) / a + eps
+            eps = self.config.eps
+            normalized = torch.abs(pooled) / scale + eps
             q1 = -torch.log2(normalized)
-            q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
+            q1 = torch.clamp(q1.round(), 0, self.config.max_value).to(torch.int8)
 
-            threshold = 10000000
-            err = (pooled / a + eps) - (2 ** -q1)
+            err = (pooled / scale + eps) - (2 ** -q1)
             q2 = None
             s_err = None
-            if torch.any(torch.abs(err) > threshold):
-
+            if torch.any(torch.abs(err) > self.config.threshold):
                 s_err = torch.sign(err)
                 s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
-                normalized_err = torch.abs(err) / a + eps
+                normalized_err = torch.abs(err) / scale + eps
                 q2 = -torch.log2(normalized_err)
-                q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
+                q2 = torch.clamp(q2.round(), 0, self.config.max_value).to(torch.int8)
             
-            quantized_simulated_output = LogQuantizedTensor(q1, a, s, q2, s_err)
+            quantized_simulated_output = LogQuantizedTensor(q1, scale, s, q2, s_err)
 
         real_output = F.adaptive_avg_pool2d(input.dequantize(), self.output_size)
         quantized_simulated_output.r = real_output - \
@@ -365,8 +436,8 @@ class LogQuantizedAdaptiveAvgPool2d(LogQuantizedOperator):
 
 
 class LogQuantizedMaxPool2d(LogQuantizedOperator):
-    def __init__(self, kernel_size, stride=None, padding=0, dilation=1):
-        super().__init__(0.1, None)
+    def __init__(self, kernel_size, stride=None, padding=0, dilation=1, config=None, device=None):
+        super().__init__(config, device)
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
@@ -379,31 +450,30 @@ class LogQuantizedMaxPool2d(LogQuantizedOperator):
             max_pooled = F.max_pool2d(input_dequant, self.kernel_size, self.stride, 
                                       self.padding, self.dilation)
 
+            # Use the config threshold instead of hardcoded value
+            scale = torch.maximum(max_pooled.abs().max(), torch.tensor(self.config.eps, device=max_pooled.device))
             s = torch.sign(max_pooled)
-            max_abs = max_pooled.abs().max()
-            a = torch.maximum(max_abs, torch.tensor(1e-8))
+            s = torch.where(s == 0, torch.ones_like(s), s)
 
-            eps = 1e-8
-            normalized = torch.abs(max_pooled) / a + eps
+            eps = self.config.eps
+            normalized = torch.abs(max_pooled) / scale + eps
             q1 = -torch.log2(normalized)
-            q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
+            q1 = torch.clamp(q1.round(), 0, self.config.max_value).to(torch.int8)
 
-            threshold = 10000000
-            err = (max_pooled / a + eps) - (2 ** -q1)
+            err = (max_pooled / scale + eps) - (2 ** -q1)
             q2 = None
             s_err = None
-            if torch.any(torch.abs(err) > threshold):
-
+            if torch.any(torch.abs(err) > self.config.threshold):
                 s_err = torch.sign(err)
                 s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
-                normalized_err = torch.abs(err) / a + eps
+                normalized_err = torch.abs(err) / scale + eps
                 q2 = -torch.log2(normalized_err)
-                q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
-
+                q2 = torch.clamp(q2.round(), 0, self.config.max_value).to(torch.int8)
             
-            quantized_simulated_output = LogQuantizedTensor(q1, a, s, q2, s_err)
+            quantized_simulated_output = LogQuantizedTensor(q1, scale, s, q2, s_err)
+            
         real_output = F.max_pool2d(input.dequantize(), self.kernel_size, self.stride, 
-                                      self.padding, self.dilation)
+                                  self.padding, self.dilation)
         
         quantized_simulated_output.r = real_output - \
             (real_output - quantized_simulated_output.dequantize()).detach()
@@ -418,9 +488,10 @@ class LogQuantizedMaxPool2d(LogQuantizedOperator):
             assert isinstance(input, torch.Tensor)
             return F.max_pool2d(input, self.kernel_size, self.stride, self.padding, self.dilation)
         
+        
 class LogQuantizedReLU(LogQuantizedOperator):
-    def __init__(self, momentum=0.1, device=None) -> None:
-        super().__init__(momentum, device)
+    def __init__(self, config=None, device=None) -> None:
+        super().__init__(config, device)
 
     def _activation_quantized_forward(self, input: LogQuantizedTensor) -> LogQuantizedTensor:
         simulated_output = F.relu(input.dequantize())
@@ -442,42 +513,19 @@ class LogQuantizedReLU(LogQuantizedOperator):
             self.update_max_abs_stats(output)
             return output
     
-# difference between scale per tensor and scale per weight
 
 class LogQuantizedLinear(LogQuantizedOperator):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True, momentum=0.1, device=None) -> None:
-        super().__init__(momentum, device)
-        self.linear = nn.Linear(in_features, out_features, bias, device)
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, 
+                 config=None, device=None, per_channel=False) -> None:
+        super().__init__(config, device)
+        self.linear = nn.Linear(in_features, out_features, bias, device=self.config.device)
+        self.per_channel = per_channel
 
     def _quantize_weight(self, weight: torch.Tensor):
+        # Use the utility function
+        return LogQuantUtils.quantize_weight(weight, self.config, per_channel=self.per_channel)
 
-        a = weight.abs().max()
-        # a = weight.abs().max(dim=1)[0]  
-        s = torch.sign(weight)
-        s = torch.where(s == 0, torch.ones_like(s), s)
-
-        eps = 1e-8
-        normalized = torch.abs(weight) / a + eps
-        q1 = -torch.log2(normalized)
-    
-        q1 = torch.clamp(q1.round(), 0, 127).to(torch.int8)
-
-        threshold = 10000000
-        err = (weight / a + eps) - (2 ** -q1)
-        q2 = None
-        s_err = None
-        if torch.any(torch.abs(err) > threshold):
-
-            s_err = torch.sign(err)
-            s_err = torch.where(s_err == 0, torch.ones_like(s_err), s_err)
-            normalized_err = torch.abs(err) / a + eps
-            q2 = -torch.log2(normalized_err)
-            q2 = torch.clamp(q2.round(), 0, 127).to(torch.int8)
-    
-        return LogQuantizedTensor(q1, a, s, q2, s_err)
-
-        
-    def _quantize_bias(self, quantized_input: LogQuantizedTensor, quantized_weight: LogQuantizedTensor, bias: torch.Tensor):
+    def _quantize_bias(self, quantized_input, quantized_weight, bias):
         return bias
     
     def _activation_quantized_forward(self, input: LogQuantizedTensor) -> LogQuantizedTensor:
@@ -508,9 +556,10 @@ class LogQuantizedLinear(LogQuantizedOperator):
             self.update_max_abs_stats(output)
             return output
 
+
 class LogQuantizedFlatten(LogQuantizedOperator):
-    def __init__(self, start_dim, end_dim=-1) -> None:
-        super().__init__(0.1, None)
+    def __init__(self, start_dim, end_dim=-1, config=None, device=None) -> None:
+        super().__init__(config, device)
         self.start_dim = start_dim
         self.end_dim = end_dim
 
@@ -518,15 +567,27 @@ class LogQuantizedFlatten(LogQuantizedOperator):
         if self.activation_quantization:
             assert isinstance(input, LogQuantizedTensor)
             q1 = torch.flatten(input.q1, self.start_dim, self.end_dim)
-            r = torch.flatten(input.r, self.start_dim, self.end_dim)
+            r = None if input.r is None else torch.flatten(input.r, self.start_dim, self.end_dim)
+            
+            q2 = None
             if input.q2 is not None:
-                q2 =  torch.flatten(input.q2, self.start_dim, self.end_dim)
-            else:
-                q2 = None
+                q2 = torch.flatten(input.q2, self.start_dim, self.end_dim)
+                
             return LogQuantizedTensor(q1, input.a, input.s, q2, input.s_err, r)
         else:
             assert isinstance(input, torch.Tensor)
             return torch.flatten(input, self.start_dim, self.end_dim)
 
 
+# Helper functions to enable/disable quantization across the model
+def enable_quantization(model):
+    """Enable quantization for all quantized layers in a model."""
+    for module in model.modules():
+        if isinstance(module, LogQuantizedOperator):
+            module.activation_quantization = True
 
+def disable_quantization(model):
+    """Disable quantization for all quantized layers in a model."""
+    for module in model.modules():
+        if isinstance(module, LogQuantizedOperator):
+            module.activation_quantization = False
