@@ -17,9 +17,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Import QAT components
 from networks.log_resnet import resnet18, BasicBlock
-from log_ops import LogQuantizedOperator, enable_quantization, disable_quantization
+from ops import LogQuantizedOperator, enable_quantization, disable_quantization
 
-from log_ops import (
+from ops.log import (
     LogQuantConfig, LogQuantize, LogQuantizedAdaptiveAvgPool2d, 
     LogQuantizedConv2dBatchNorm2dReLU, LogQuantizedFlatten, 
     LogQuantizedLinear, LogQuantizedMaxPool2d, LogQuantizedReLU, 
@@ -64,22 +64,53 @@ class CIFAR10ResNet(nn.Module):
     """
     ResNet model adapted for CIFAR-10 with log quantization support.
     """
+    # def __init__(self, device, threshold=1e-5):
+    #     super().__init__()
+
+    #     # Pass threshold to the model explicitly
+    #     model = resnet18(num_classes=10, device=device, threshold=threshold)
+
+        
+    #     # Modify the first layer to work with CIFAR-10 images (32x32)
+    #     model.conv1 = LogQuantizedConv2dBatchNorm2dReLU(
+    #         3, 64, kernel_size=3, stride=1, padding=1, 
+    #         bias=False, activation="relu", 
+    #         config=model.config,  # Share the configuration
+    #         device=device
+    #     )
+
+    #     # Remove maxpool as it's too aggressive for small CIFAR images
+    #     model.maxpool = nn.Identity()
+        
+        
+    #     self.model = model
+    #     self.device = device
+    #     self.model.to(self.device)
     def __init__(self, device, threshold=1e-5):
         super().__init__()
-
-        # Pass threshold to the model explicitly
+        
+        # Create the model with shared config for internal layers
         model = resnet18(num_classes=10, device=device, threshold=threshold)
         
-        # Modify the first layer to work with CIFAR-10 images (32x32)
+        # Create a separate config for the first layer
+        first_layer_config = LogQuantConfig(
+            momentum=0.1,
+            threshold=threshold,
+            eps=1e-8,
+            bits=8,
+            device=device
+        )
+        
+        # Replace first layer with one using the separate conf ig
         model.conv1 = LogQuantizedConv2dBatchNorm2dReLU(
             3, 64, kernel_size=3, stride=1, padding=1, 
             bias=False, activation="relu", 
-            config=model.config,  # Share the configuration
+            config=first_layer_config,  # Separate config
             device=device
         )
-        # Remove maxpool as it's too aggressive for small CIFAR images
-        model.maxpool = nn.Identity()
         
+        # Rest of initialization
+        model.maxpool = nn.Identity()
         self.model = model
         self.device = device
         self.model.to(self.device)
