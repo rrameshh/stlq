@@ -1,14 +1,21 @@
 # Modified from torchvision.models.resnet
+# networks/log_resnet.py - with shared config support
 
 from typing import Optional, Callable, Type, List, Union, Any
 
 import torch
 import torch.nn as nn
 
-from log_ops import LogQuantize, LogQuantizedAdaptiveAvgPool2d, LogQuantizedConv2dBatchNorm2dReLU, LogQuantizedFlatten, LogQuantizedLinear, LogQuantizedMaxPool2d, LogQuantizedReLU, LogQuantizedAdd, LogQuantizedTensor
+from ops.log import (
+    LogQuantConfig, LogQuantize, LogQuantizedAdaptiveAvgPool2d, 
+    LogQuantizedConv2dBatchNorm2dReLU, LogQuantizedFlatten, 
+    LogQuantizedLinear, LogQuantizedMaxPool2d, LogQuantizedReLU, 
+    LogQuantizedAdd, LogQuantizedTensor
+)
 
 
-def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1, activation=None):
+def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, 
+            dilation: int = 1, activation=None, config=None, device=None):
     """3x3 convolution with padding"""
     return LogQuantizedConv2dBatchNorm2dReLU(
         in_planes,
@@ -19,15 +26,18 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, d
         groups=groups,
         bias=False,
         dilation=dilation,
-        activation=activation
+        activation=activation,
+        config=config,
+        device=device
     )
 
 
-def conv1x1(in_planes: int, out_planes: int, stride: int = 1, activation=None):
+def conv1x1(in_planes: int, out_planes: int, stride: int = 1, activation=None, 
+            config=None, device=None):
     """1x1 convolution"""
     return LogQuantizedConv2dBatchNorm2dReLU(
         in_planes, out_planes, kernel_size=1, stride=stride, bias=False,
-        activation=activation
+        activation=activation, config=config, device=device
     )
 
 
@@ -42,7 +52,9 @@ class BasicBlock(nn.Module):
         downsample: Optional[nn.Module] = None,
         groups: int = 1,
         base_width: int = 64,
-        dilation: int = 1
+        dilation: int = 1,
+        config: Optional[LogQuantConfig] = None,
+        device = None
     ) -> None:
         super().__init__()
         if groups != 1 or base_width != 64:
@@ -53,10 +65,12 @@ class BasicBlock(nn.Module):
                 "Dilation > 1 not supported in BasicBlock")
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
 
-        self.conv1 = conv3x3(inplanes, planes, stride, activation="relu")
-        self.conv2 = conv3x3(planes, planes)
-        self.relu = LogQuantizedReLU()
-        self.add = LogQuantizedAdd()
+        self.conv1 = conv3x3(inplanes, planes, stride, 
+                            activation="relu", config=config, device=device)
+        self.conv2 = conv3x3(planes, planes, 
+                            config=config, device=device)
+        self.relu = LogQuantizedReLU(config=config, device=device)
+        self.add = LogQuantizedAdd(config=config, device=device)
         self.downsample = downsample
         self.stride = stride
 
@@ -93,18 +107,20 @@ class Bottleneck(nn.Module):
         groups: int = 1,
         base_width: int = 64,
         dilation: int = 1,
+        config: Optional[LogQuantConfig] = None,
+        device = None
     ) -> None:
         super().__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
         width = int(planes * (base_width / 64.0)) * groups
         # Both self.conv2 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv1x1(inplanes, width, activation="relu")
-        self.conv2 = conv3x3(width, width, stride, groups,
-                             dilation, activation="relu")
-        self.conv3 = conv1x1(width, planes * self.expansion)
-        self.relu = LogQuantizedReLU()
-        self.add = LogQuantizedAdd()
+        self.conv1 = conv1x1(inplanes, width, activation="relu", 
+                           config=config, device=device)
+        self.conv2 = conv3x3(width, width, stride, groups, dilation, 
+                           activation="relu", config=config, device=device)
+        self.conv3 = conv1x1(width, planes * self.expansion, 
+                           config=config, device=device)
+        self.relu = LogQuantizedReLU(config=config, device=device)
+        self.add = LogQuantizedAdd(config=config, device=device)
         self.downsample = downsample
         self.stride = stride
 
@@ -134,10 +150,20 @@ class ResNet(nn.Module):
         groups: int = 1,
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
-        stlq_ratio: float = 0.1
+        threshold: float = 1e-5,  # Use recommended threshold instead of 10000000
+        device = None
     ) -> None:
         super().__init__()
 
+        # Create a shared configuration for all layers
+        self.config = LogQuantConfig(
+            momentum=0.1,
+            threshold=threshold,
+            eps=1e-8,
+            bits=8,
+            device=device
+        )
+        
         self.inplanes = 64
         self.dilation = 1
         if replace_stride_with_dilation is None:
@@ -151,13 +177,16 @@ class ResNet(nn.Module):
             )
         self.groups = groups
         self.base_width = width_per_group
-        self.quantize = LogQuantize()
+        self.quantize = LogQuantize(config=self.config, device=device)
 
         self.conv1 = LogQuantizedConv2dBatchNorm2dReLU(
             3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False,
-            activation="relu"
+            activation="relu", config=self.config, device=device
         )
-        self.maxpool = LogQuantizedMaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.maxpool = LogQuantizedMaxPool2d(
+            kernel_size=3, stride=2, padding=1, 
+            config=self.config, device=device
+        )
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(
             block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
@@ -165,9 +194,16 @@ class ResNet(nn.Module):
             block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(
             block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
-        self.avgpool = LogQuantizedAdaptiveAvgPool2d((1, 1))
-        self.flatten = LogQuantizedFlatten(1)
-        self.fc = LogQuantizedLinear(512 * block.expansion, num_classes)
+        self.avgpool = LogQuantizedAdaptiveAvgPool2d(
+            (1, 1), config=self.config, device=device
+        )
+        self.flatten = LogQuantizedFlatten(1, config=self.config, device=device)
+        self.fc = LogQuantizedLinear(
+            512 * block.expansion, 
+            num_classes, 
+            config=self.config, 
+            device=device
+        )
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -204,13 +240,21 @@ class ResNet(nn.Module):
             stride = 1
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                conv1x1(self.inplanes, planes * block.expansion, stride),
+                conv1x1(
+                    self.inplanes, 
+                    planes * block.expansion, 
+                    stride, 
+                    config=self.config, 
+                    device=self.config.device
+                ),
             )
 
         layers = []
         layers.append(
             block(
-                self.inplanes, planes, stride, downsample, self.groups, self.base_width, previous_dilation
+                self.inplanes, planes, stride, downsample, 
+                self.groups, self.base_width, previous_dilation,
+                config=self.config, device=self.config.device
             )
         )
         self.inplanes = planes * block.expansion
@@ -222,6 +266,8 @@ class ResNet(nn.Module):
                     groups=self.groups,
                     base_width=self.base_width,
                     dilation=self.dilation,
+                    config=self.config,
+                    device=self.config.device
                 )
             )
 
@@ -269,3 +315,10 @@ def resnet18(**kwargs: Any) -> ResNet:
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
     """
     return _resnet(BasicBlock, [2, 2, 2, 2], **kwargs)
+
+
+def resnet50(**kwargs: Any) -> ResNet:
+    r"""ResNet-50 model from
+    `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_.
+    """
+    return _resnet(Bottleneck, [3, 4, 6, 3], **kwargs)

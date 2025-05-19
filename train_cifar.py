@@ -1,6 +1,4 @@
-# Modified training script with threshold configuration
-# train.py
-
+# train_cifar.py
 import argparse
 import os
 import time
@@ -16,25 +14,13 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 # Import QAT components
-from networks.log_resnet import resnet18, BasicBlock
-from log_ops import LogQuantizedOperator, enable_quantization, disable_quantization
-
-from log_ops import (
-    LogQuantConfig, LogQuantize, LogQuantizedAdaptiveAvgPool2d, 
-    LogQuantizedConv2dBatchNorm2dReLU, LogQuantizedFlatten, 
-    LogQuantizedLinear, LogQuantizedMaxPool2d, LogQuantizedReLU, 
-    LogQuantizedAdd, LogQuantizedTensor
-)
-
+from ops import enable_quantization, disable_quantization
+from networks.resnet_factory import resnet18
 
 
 class SwitchQuantizationModeHook:
     """
     Hook to switch from calibration phase to quantization-aware training phase.
-    
-    During the first switch_iter iterations, the model calibrates statistics
-    without applying quantization to activations. After switch_iter iterations,
-    it enables activation quantization.
     """
     def __init__(self, model, switch_iter=5000):
         self.model = model
@@ -53,7 +39,6 @@ class SwitchQuantizationModeHook:
         """
         if iteration + 1 == self.switch_iter and not self.switched:
             print(f"Iteration {iteration+1}: Switching to activation quantization")
-            # Use the helper function to enable quantization on all operators
             enable_quantization(self.model)
             self.switched = True
             return True
@@ -62,26 +47,55 @@ class SwitchQuantizationModeHook:
 
 class CIFAR10ResNet(nn.Module):
     """
-    ResNet model adapted for CIFAR-10 with log quantization support.
+    ResNet model adapted for CIFAR-10 with quantization support.
     """
-    def __init__(self, device, threshold=1e-5):
+    def __init__(self, quantization_method="linear", device=None, **kwargs):
         super().__init__()
 
-        # Pass threshold to the model explicitly
-        model = resnet18(num_classes=10, device=device, threshold=threshold)
+        # Store parameters that we'll need for layer creation
+        self.device = device
+        # self.threshold = kwargs.get('threshold', 1e-5)
+        self.quantization_method = quantization_method
+
+        # Create model with the specified quantization method
+        # Handle parameters differently based on the quantization method
+        if quantization_method.lower() == "linear":
+            # For linear quantization, we only pass compatible parameters
+            # and handle device separately
+            model_kwargs = {k: v for k, v in kwargs.items() 
+                          if k not in ['device', 'threshold']}
+            
+            self.model = resnet18(quantization_method=quantization_method, 
+                                 num_classes=10, **model_kwargs)
+            
+            from ops.linear import QuantizedConv2dBatchNorm2dReLU
+            # Pass device explicitly to the convolution layer
+            conv_layer = lambda *args, **kw: QuantizedConv2dBatchNorm2dReLU(
+                *args, **kw, device=device)
+        elif quantization_method.lower() == "log":
+            # For log quantization, we pass all parameters
+            self.model = resnet18(quantization_method=quantization_method, 
+                                 num_classes=10, device=device, 
+                                  **kwargs)
+            
+            from ops.log import LogQuantizedConv2dBatchNorm2dReLU, LogQuantConfig
+            # Create config to pass to the conv layer
+            config = LogQuantConfig(device=device, 
+                              threshold=kwargs.get('threshold', 1e-5))
+            # Partial function to pass config
+            conv_layer = lambda *args, **kw: LogQuantizedConv2dBatchNorm2dReLU(
+                *args, **kw, config=config, device=device)
+        else:
+            raise ValueError(f"Unsupported quantization method: {quantization_method}")
         
         # Modify the first layer to work with CIFAR-10 images (32x32)
-        model.conv1 = LogQuantizedConv2dBatchNorm2dReLU(
+        self.model.conv1 = conv_layer(
             3, 64, kernel_size=3, stride=1, padding=1, 
-            bias=False, activation="relu", 
-            config=model.config,  # Share the configuration
-            device=device
+            bias=False, activation="relu"
         )
         # Remove maxpool as it's too aggressive for small CIFAR images
-        model.maxpool = nn.Identity()
+        self.model.maxpool = nn.Identity()
         
-        self.model = model
-        self.device = device
         self.model.to(self.device)
 
     def forward(self, x):
@@ -217,28 +231,48 @@ def main():
     parser.add_argument("--batch-size", default=128, type=int)
     parser.add_argument("--lr", default=0.1, type=float)
     parser.add_argument("--num-epochs", default=200, type=int)
-    parser.add_argument("--work-dir", default="./output_log", type=str)
+    parser.add_argument("--work-dir", default="./output", type=str)
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu", type=str)
     parser.add_argument("--num-workers", default=4, type=int)
     parser.add_argument("--switch-iter", default=5000, type=int, 
-                      help="Iteration to switch to activation quantization")
-    parser.add_argument("--threshold", default=1000000, type=float,
-                      help="Threshold for second-order quantization")
+                       help="Iteration to switch to activation quantization")
+    parser.add_argument("--quantization", default="linear", type=str,
+                       choices=["linear", "log"], help="Quantization method to use")
+    parser.add_argument("--threshold", default=1e-5, type=float,
+                       help="Threshold for second-order quantization in log method")
+    parser.add_argument("--early-stop", default=10, type=int,
+                       help="Early stopping patience (epochs without improvement)")
     
     args = parser.parse_args()
     
-    os.makedirs(args.work_dir, exist_ok=True)
-    writer = SummaryWriter(args.work_dir)
+    # Create work directory based on quantization method
+    work_dir = f"{args.work_dir}_{args.quantization}"
+    os.makedirs(work_dir, exist_ok=True)
+    
+    writer = SummaryWriter(work_dir)
     train_loader, test_loader = get_cifar10_dataloaders(
         batch_size=args.batch_size, num_workers=args.num_workers
     )
     
-    model = CIFAR10ResNet(device=args.device, threshold=args.threshold)
+    # Create model with specified quantization method
+    # Only pass the threshold parameter for log quantization
+    model_kwargs = {}
+    if args.quantization == "log":
+        model_kwargs['threshold'] = args.threshold
+    
+    model = CIFAR10ResNet(
+        quantization_method=args.quantization,
+        device=args.device, 
+        **model_kwargs
+    )
+    
     print(f"Device used: {model.device}")
     print(f"Model weights on CUDA: {next(model.parameters()).is_cuda}")
-    print(f"Using threshold value: {args.threshold}")
+    print(f"Using {args.quantization} quantization method")
+    if args.quantization == "log":
+        print(f"Using threshold value: {args.threshold}")
     
-    # quantization is disabled for calibration phase
+    # Disable quantization for calibration phase
     disable_quantization(model)
     
     # Create optimizer
@@ -247,17 +281,19 @@ def main():
         momentum=0.9, weight_decay=1e-4
     )
     
-
+    # Create learning rate scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.num_epochs
     )
     
+    # Create quantization switch hook
     switch_hook = SwitchQuantizationModeHook(
         model=model, switch_iter=args.switch_iter
     )
     
     # Training loop
     best_accuracy = 0.0
+    epochs_without_improvement = 0
     print(f"Starting training for {args.num_epochs} epochs...")
     print(f"Will switch to quantization after {args.switch_iter} iterations")
     
@@ -265,15 +301,23 @@ def main():
         # Update learning rate
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch {epoch+1}/{args.num_epochs}, Learning Rate: {current_lr:.6f}")
+        
         # Train one epoch
         train_epoch(model, train_loader, optimizer, epoch, switch_hook, writer)
         
         # Validate
         accuracy = validate(model, test_loader, epoch, writer)
         
+        # Early stopping and checkpoint saving
         if accuracy > best_accuracy:
             best_accuracy = accuracy
-            save_checkpoint(model, optimizer, accuracy, epoch, args.work_dir)
+            save_checkpoint(model, optimizer, accuracy, epoch, work_dir)
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= args.early_stop:
+                print(f"Early stopping triggered after {epoch+1} epochs")
+                break
         
         # Update the learning rate
         scheduler.step()
@@ -281,7 +325,7 @@ def main():
     print(f"Training completed. Best accuracy: {best_accuracy:.2f}%")
     
     # Save final model
-    torch.save(model.state_dict(), f'{args.work_dir}/final_model.pth')
+    torch.save(model.state_dict(), f'{work_dir}/final_model.pth')
     
     # Close TensorBoard writer
     writer.close()
