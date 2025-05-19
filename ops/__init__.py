@@ -23,10 +23,16 @@ except ImportError:
     pass
 
 # Helper functions for all quantization methods
+# def enable_quantization(model):
+#     """Enable quantization for all quantized layers in a model."""
+#     for module in model.modules():
+#         if isinstance(module, QuantizedOperatorBase):
+#             module.activation_quantization = True
+
 def enable_quantization(model):
     """Enable quantization for all quantized layers in a model."""
     for module in model.modules():
-        if isinstance(module, QuantizedOperatorBase):
+        if hasattr(module, 'activation_quantization'):  # Check for attribute
             module.activation_quantization = True
 
 def disable_quantization(model):
