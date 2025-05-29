@@ -21,19 +21,6 @@ from networks.resnet_factory import resnet18
 
 from utils.training import train_epoch, validate, save_checkpoint
 
-####################
-# NEED TO CHANGE THIS SCRIPT TO HANDLE DATASET SWITCHING
-# - Remember: task1 is linear quantization wiht activation quant (i believe, double check) output in output_linear, 
-#              imagenet dataset
-#               
-# - task 2 is log with activation quant (output in output_log ) with imagenet dataset but has old runs in it so could be messy
-#  - task 3 is log with NO activation quant (output in output_noquant_log ) with imagenet dataset
-# NEED TO DO MIXED PRECISION WITH IMAGENET AND PLOT RESULTS
-# TAKE VALUES FROM MIXED PRECISION AND TAKE THE BEST MODEL CHECKPOINT AND DO A HISTOGRAM WITH IT
-# SUNDAY = BASICS OF TRANFORMER STUFF OR MORE CNN'S
-
-# reason why it was working better be because of per channel vs per tensor?
-
 
 class SwitchQuantizationModeHook:
     """
