@@ -4,7 +4,7 @@ import torch
 
 from qat.networks.resnet import resnet18
 from qat.networks.cnn_wrapper import CNNWrapper
-from qat.ops import QuantizedOperator
+from qat.ops.linear import QuantizedOperator
 from runner.train import dist_train
 from runner.hooks import TensorboardLoggerHook, CheckpointHook, Hook
 
