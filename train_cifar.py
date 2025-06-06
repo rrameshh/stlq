@@ -58,7 +58,8 @@ def setup_training_components(args):
         quantization_method=args.quantization,
         num_classes=100,
         device=args.device,
-        threshold=args.threshold  # Works for both log and mixed
+        threshold=args.threshold,
+        bits=args.bits
     )
     
     # Modify for CIFAR-10 (32x32 images)
@@ -143,6 +144,7 @@ def main():
     parser.add_argument("--work-dir", default="./output", type=str)
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu", type=str)
     parser.add_argument("--num-workers", default=4, type=int)
+    parser.add_argument("--bits", default=8, type=int)
     parser.add_argument("--switch-iter", default=5000, type=int, 
                        help="Iteration to switch to activation quantization")
     parser.add_argument("--quantization", default="linear", type=str,

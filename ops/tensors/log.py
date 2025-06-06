@@ -18,20 +18,43 @@ class LogQuantizedTensor(QuantizedTensorBase):
     def dequantize(self) -> torch.Tensor:
         if self.r is not None:
             return self.r
-        else:
-            eps = 1e-8
-            # Primary reconstruction
-            prim = (self.s * 
-                   self.a.view(*self.a.shape, *([1] * (self.q1.dim() - self.a.dim()))) * 
-                   torch.maximum((2.0 ** (-self.q1)), torch.tensor(eps, device=self.q1.device)))
+        
+        # Ensure a is broadcastable to weight shape
+        if self.a.dim() == 1:  # Per-channel case
+            a_expanded = self.a.view(-1, *([1] * (self.q1.dim() - 1)))
+        else:  # Per-tensor case
+            a_expanded = self.a
+        
+        # Primary reconstruction
+        prim = self.s * a_expanded * torch.pow(2.0, -self.q1.float())
+        
+        # Secondary reconstruction if available
+        if self.q2 is not None and self.s_err is not None:
+            second = self.s_err * a_expanded * torch.pow(2.0, -self.q2.float())
+            return prim + second
+        
+        return prim
+
+ 
+
+    # def dequantize(self) -> torch.Tensor:
+    #     if self.r is not None:
+    #         return self.r
+    #     else:
+    #         eps = 1e-8
+    #         # Primary reconstruction
+    #         prim = (self.s * 
+    #                self.a.view(*self.a.shape, *([1] * (self.q1.dim() - self.a.dim()))) * 
+    #                torch.maximum((2.0 ** (-self.q1)), torch.tensor(eps, device=self.q1.device)))
             
-            # Secondary reconstruction if available
-            if self.q2 is not None and self.s_err is not None:
-                second = (self.s_err * 
-                         self.a.view(*self.a.shape, *([1] * (self.q2.dim() - self.a.dim()))) * 
-                         torch.maximum((2.0 ** (-self.q2)), torch.tensor(eps, device=self.q2.device)))
-                return prim + second
-            return prim
+    #         # Secondary reconstruction if available
+    #         if self.q2 is not None and self.s_err is not None:
+    #             second = (self.s_err * 
+    #                      self.a.view(*self.a.shape, *([1] * (self.q2.dim() - self.a.dim()))) * 
+    #                      torch.maximum((2.0 ** (-self.q2)), torch.tensor(eps, device=self.q2.device)))
+    #             return prim + second
+    
+    #         return prim
 
     def map(self, func):
         return LogQuantizedTensor(
