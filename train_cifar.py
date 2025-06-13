@@ -16,6 +16,8 @@ from torch.utils.tensorboard import SummaryWriter
 # Import QAT components
 from ops import enable_quantization, disable_quantization, print_quantization_status
 from networks.unified_resnet import resnet18  # Use unified ResNet
+from networks.load_pretrained import load_pretrained_resnet  # Use unified ResNet
+
 from ops.quant_config import QuantizationConfig
 
 from utils.training import train_epoch, validate, save_checkpoint
@@ -52,7 +54,6 @@ def setup_training_components(args):
     train_loader, test_loader = get_imagenet100_dataloaders(
         batch_size=args.batch_size, num_workers=args.num_workers
     )
-    
 
     model = resnet18(
         quantization_method=args.quantization,
@@ -61,6 +62,9 @@ def setup_training_components(args):
         threshold=args.threshold,
         bits=args.bits
     )
+
+    if args.pretrained:
+        model = load_pretrained_resnet(model, num_classes=100)
     
     # Modify for CIFAR-10 (32x32 images)
     # Replace first conv and remove maxpool for small images
@@ -153,6 +157,9 @@ def main():
                        help="Threshold for log quantization")
     parser.add_argument("--early-stop", default=10, type=int,
                        help="Early stopping patience (epochs without improvement)")
+    
+    parser.add_argument("--pretrained", nargs='?', const=True, default=False, help="use pretrained model")
+    
     
     args = parser.parse_args()
     

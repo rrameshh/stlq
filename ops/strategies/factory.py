@@ -1,6 +1,7 @@
 # ops/strategies/factory.py
 from .linear import LinearStrategy
-from .log import LogStrategy
+# from .log import LogStrategy
+from .new_log import LogStrategy
 
 def create_strategy(config):
     if config.method == "linear":

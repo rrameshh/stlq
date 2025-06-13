@@ -6,7 +6,8 @@ import torch.nn as nn
 
 from ..base import QuantizedOperatorBase
 from ..tensors.linear import LinearQuantizedTensor
-from ..tensors.log import LogQuantizedTensor
+# from ..tensors.log import LogQuantizedTensor
+from ..tensors.new_log import LogQuantizedTensor
 from ..strategies.factory import create_strategy
 from ..quant_config import QuantizationConfig
 

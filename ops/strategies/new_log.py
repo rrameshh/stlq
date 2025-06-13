@@ -1,6 +1,7 @@
-#ops/strategies/log.py
+#ops/strategies/new_log.py
 from .base import QuantizationStrategy
 from ..tensors.log import LogQuantizedTensor
+# from ..tensors.new_log import LogQuantizedTensor
 import torch
 from ..quant_config import QuantizationConfig
 import numpy as np
@@ -24,113 +25,107 @@ class LogStrategy(QuantizationStrategy):
             return self._quantize_weight_per_tensor(weight, config)
     
     def _quantize_weight_per_channel(self, weight: torch.Tensor, config):
-        """Per-channel log quantization with proper zero handling following STLQ approach."""
-        # Reshape for per-channel scaling
+
         weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, rest]
-       
-        # Get max absolute value per output channel
         a = weight_reshaped.abs().max(dim=1).values  # [out_channels]
         a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
         a_view = a.view(a.shape[0], *([1] * (weight.dim() - 1)))
-        
-        # Handle signs
         s = torch.sign(weight)
-        s = torch.where(s == 0, torch.ones_like(s), s)
 
-        # STLQ approach: zeros get special handling
         zero_mask = (weight == 0.0)
         non_zero_mask = ~zero_mask
-        
+
         max_value = (2 ** config.bits) - 1
-        
-        # Initialize q1 with zeros (quantization code 0 represents zero weights)
         q1 = torch.zeros_like(weight, dtype=torch.uint8)
-        
-        # Only compute log quantization for non-zero weights
+
+
         if torch.any(non_zero_mask):
             normalized = torch.abs(weight[non_zero_mask]) / a_view.expand_as(weight)[non_zero_mask]
+            normalized = normalized.float()
+            # print(f"DEBUG Q1 - Normalized range: [{normalized.min().item():.8f}, {normalized.max().item():.8f}]")
             q1_non_zero = -torch.log2(normalized)
-            # For non-zero weights, quantization codes start from 1 (following STLQ paper)
-            q1_non_zero = torch.clamp(q1_non_zero.round(), 1, max_value)
-            q1[non_zero_mask] = q1_non_zero.to(torch.uint8)
-        
-        # Calculate residual error
-        # For zero weights: err = 0 - 0 = 0 (perfect reconstruction)
-        # For non-zero weights: err = original - reconstructed
-        reconstructed = torch.zeros_like(weight)
+            # print(f"DEBUG Q1 - Raw q1 range: [{q1_non_zero.min().item():.2f}, {q1_non_zero.max().item():.2f}]")
+            q1_non_zero = torch.clamp((q1_non_zero.round()), 0, max_value)
+            # print(f"DEBUG Q1 - Clamped q1 range: [{q1_non_zero.min().item()}, {q1_non_zero.max().item()}]")
+            q1[non_zero_mask] = q1_non_zero.to(torch.uint8) # check dtype
+
+
+        normalized_weight = (weight / a_view).float()
+        reconstructed_normalized = torch.zeros_like(normalized_weight, dtype = torch.float32)
+        reconstructed_normalized = reconstructed_normalized.float()
+
+
         if torch.any(non_zero_mask):
-            reconstructed[non_zero_mask] = s[non_zero_mask] * torch.pow(2.0, -q1[non_zero_mask].float()) * a_view.expand_as(weight)[non_zero_mask]
+            reconstructed_normalized[non_zero_mask] = torch.pow(2.0, -q1[non_zero_mask].float())
         
-        err = weight - reconstructed
-        
-        # Zero weights will have zero error, so they won't participate in second-word quantization
-        err_magnitude = torch.abs(err)
+        err_normalized = normalized_weight - reconstructed_normalized
+        err_normalized = err_normalized.float()
+        err_magnitude = torch.abs(err_normalized)
         second_word_mask = (err_magnitude > config.threshold) & non_zero_mask  # Exclude zeros
+
+        
+        # print(f"Threshold: {config.threshold}")
+        # print(f"Max error magnitude: {err_magnitude.max().item()}")
+        # print(f"Number of errors > threshold: {(err_magnitude > config.threshold).sum().item()}")
+        # print(f"Non-zero mask sum: {non_zero_mask.sum().item()}")
+        # print(f"Second-word mask sum: {second_word_mask.sum().item()}")
+        # print(f"Any second words?: {torch.any(second_word_mask)}")
 
         q2 = None
         s_err = None
-        
+
         if torch.any(second_word_mask):
             q2 = torch.zeros_like(q1)
             s_err = torch.zeros_like(s)
+            selected_err_normalized = err_normalized[second_word_mask]
+            s_err_selected = torch.sign(selected_err_normalized)
 
-            sel_err = err[second_word_mask]  # [num_selected]
-            a_expanded = a_view.expand_as(weight)
-            sel_a = a_expanded[second_word_mask]
+            selected_err_mag = torch.abs(selected_err_normalized).float()
+            if torch.any(selected_err_mag <= 0):
+                print(f"WARNING: Zero or negative error magnitudes found: {(selected_err_mag <= 0).sum().item()}")
+                selected_err_mag = torch.clamp(selected_err_mag, min=1e-8)  # Prevent log(0)
 
-            s_err_selected = torch.sign(sel_err)
-            s_err_selected = torch.where(s_err_selected == 0, torch.ones_like(s_err_selected), s_err_selected)
-
-            normalized_err = torch.abs(sel_err) / sel_a
-            q2_selected = -torch.log2(normalized_err)
-            # Apply offset of 2 as per HSTLQ paper (Eq. 9): clamp(..., 2, 2^bit-1+2)
-            # But store the offset-adjusted value for hardware efficiency
-            q2_selected = torch.clamp(q2_selected.round() - 2, 0, max_value).to(torch.uint8)
-            
+            # print(f"DEBUG Q2 - Selected error mag range: [{selected_err_mag.min().item():.6f}, {selected_err_mag.max().item():.6f}]")
+            # print(f"DEBUG Q2 - Any zeros in selected_err_mag?: {(selected_err_mag == 0).sum().item()}")
+            # print(f"DEBUG Q2 - Any infs in selected_err_mag?: {torch.isinf(selected_err_mag).sum().item()}")
+            q2_selected = -torch.log2(selected_err_mag)
+            # print(f"DEBUG Q2 - q2_selected range: [{q2_selected.min().item():.6f}, {q2_selected.max().item():.6f}]")
+            # print(f"DEBUG Q2 - Any infs in q2_selected?: {torch.isinf(q2_selected).sum().item()}")
+            q2_selected = torch.clamp((q2_selected.round()), 2, max_value + 2).to(torch.uint8)
             q2[second_word_mask] = q2_selected
             s_err[second_word_mask] = s_err_selected
+
 
         return LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
     
     def _quantize_weight_per_tensor(self, weight: torch.Tensor, config):
-        """Per-tensor log quantization with proper zero handling following STLQ approach."""
-        # Per-tensor scaling
+
         a = weight.abs().max()
         a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
-        
-        # Handle signs
         s = torch.sign(weight)
-        s = torch.where(s == 0, torch.ones_like(s), s)
-        
-        # STLQ approach: zeros get special handling
+
         zero_mask = (weight == 0.0)
         non_zero_mask = ~zero_mask
         
         max_value = (2 ** config.bits) - 1
         
-        # Initialize q1 with zeros (quantization code 0 represents zero weights)
         q1 = torch.zeros_like(weight, dtype=torch.uint8)
-        
-        # Only compute log quantization for non-zero weights
         if torch.any(non_zero_mask):
             normalized = torch.abs(weight[non_zero_mask]) / a
             q1_non_zero = -torch.log2(normalized)
-            # For non-zero weights, quantization codes start from 1 (following STLQ paper)
-            q1_non_zero = torch.clamp(q1_non_zero.round(), 1, max_value)
+            q1_non_zero = torch.clamp((q1_non_zero.round()), 0, max_value)
             q1[non_zero_mask] = q1_non_zero.to(torch.uint8)
-
-        # Calculate residual error
-        # For zero weights: err = 0 - 0 = 0 (perfect reconstruction)
-        # For non-zero weights: err = original - reconstructed
-        reconstructed = torch.zeros_like(weight)
-        if torch.any(non_zero_mask):
-            reconstructed[non_zero_mask] = s[non_zero_mask] * torch.pow(2.0, -q1[non_zero_mask].float()) * a
         
-        err = weight - reconstructed
 
-        # Zero weights will have zero error, so they won't participate in second-word quantization
+        normalized_weight = weight / a
+        reconstructed_normalized = torch.zeros_like(normalized_weight)
+        if torch.any(non_zero_mask):
+            reconstructed_normalized[non_zero_mask] = torch.pow(2.0, -q1[non_zero_mask])
+        
+        err = normalized_weight - reconstructed_normalized
         err_mag = torch.abs(err)
         second_word_mask = (err_mag > config.threshold) & non_zero_mask  # Exclude zeros
+
 
         q2 = None
         s_err = None
@@ -139,16 +134,11 @@ class LogStrategy(QuantizationStrategy):
             q2 = torch.zeros_like(q1)
             s_err = torch.zeros_like(s)
             sel_err = err[second_word_mask]
-            sel_a = a
-
             s_err_selected = torch.sign(sel_err)
-            s_err_selected = torch.where(s_err_selected == 0, torch.ones_like(s_err_selected), s_err_selected)
 
-            normalized_err = torch.abs(sel_err) / sel_a
-            q2_selected = -torch.log2(normalized_err)
-            # Apply offset of 2 as per HSTLQ paper (Eq. 9): clamp(..., 2, 2^bit-1+2)
-            # But store the offset-adjusted value for hardware efficiency
-            q2_selected = torch.clamp(q2_selected.round() - 2, 0, max_value).to(torch.uint8)
+            selected_err_mag = torch.abs(sel_err)
+            q2_selected = -torch.log2(selected_err_mag)
+            q2_selected = torch.clamp((q2_selected.round()), 2, max_value + 2).to(torch.uint8)
             q2[second_word_mask] = q2_selected
             s_err[second_word_mask] = s_err_selected
 

@@ -1,4 +1,3 @@
-# data/imagenet100.py
 import torch
 from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms

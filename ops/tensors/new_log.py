@@ -1,4 +1,4 @@
-# ops/tensors/log.py
+# ops/tensors/new_log.py
 import torch
 from typing import Optional
 from .base import QuantizedTensorBase
@@ -26,10 +26,6 @@ class LogQuantizedTensor(QuantizedTensorBase):
         else:  # Per-tensor case
             a_expanded = self.a
         
-        # HSTLQ reconstruction: X̂ = s(X)·2^(-XQ1)·α + s(Err)·2^(-XQ2)·α
-        # From the paper: both words use the same scale factor α (Eq. 8)
-        # Special case: q1=0 means exactly zero (from logarithmic quantization definition)
-        
         # Primary reconstruction: s(X)·2^(-XQ1)·α
         zero_mask = (self.q1 == 0)
         prim = torch.zeros_like(self.q1, dtype=torch.float32)
@@ -50,11 +46,8 @@ class LogQuantizedTensor(QuantizedTensorBase):
             # Only compute for non-zero second-word quantization codes
             if torch.any(~second_zero_mask):
                 second_non_zero_mask = ~second_zero_mask
-                # HSTLQ uses the same scale factor α for both words
-                # For second words with offset, we need to account for the offset in the exponent
-                # The paper mentions offset of 2 is added to quantization range (Eq. 9)
                 second[second_non_zero_mask] = (self.s_err[second_non_zero_mask] * 
-                                                torch.pow(2.0, -(self.q2[second_non_zero_mask].float() + 2)) * 
+                                                torch.pow(2.0, -(self.q2[second_non_zero_mask].float())) * 
                                                 a_expanded.expand_as(self.q2)[second_non_zero_mask])
             
             return prim + second
