@@ -51,9 +51,14 @@ class SwitchQuantizationModeHook:
 def setup_training_components(args):
     """Setup all training components"""
     # Create data loaders
-    train_loader, test_loader = get_imagenet100_dataloaders(
-        batch_size=args.batch_size, num_workers=args.num_workers
-    )
+    if args.dataset != "cifar":
+        train_loader, test_loader = get_imagenet100_dataloaders(
+            batch_size=args.batch_size, num_workers=args.num_workers
+        )
+    else:
+         train_loader, test_loader = get_cifar10_dataloaders(
+            batch_size=args.batch_size, num_workers=args.num_workers
+        )
 
     model = resnet18(
         quantization_method=args.quantization,
@@ -66,18 +71,19 @@ def setup_training_components(args):
     if args.pretrained:
         model = load_pretrained_resnet(model, num_classes=100)
     
-    # Modify for CIFAR-10 (32x32 images)
-    # Replace first conv and remove maxpool for small images
-    # if hasattr(model, 'conv1') and hasattr(model, 'config'):
-    #     from ops.layers.all import UnifiedQuantizedConv2dBatchNorm2dReLU
+    if args.dataset == "cifar":
+        # Modify for CIFAR-10 (32x32 images)
+        # Replace first conv and remove maxpool for small images
+        if hasattr(model, 'conv1') and hasattr(model, 'config'):
+            from ops.layers.all import UnifiedQuantizedConv2dBatchNorm2dReLU
+            
+            # Use the model's existing config
+            model.conv1 = UnifiedQuantizedConv2dBatchNorm2dReLU(
+                3, 64, kernel_size=3, stride=1, padding=1, 
+                bias=False, activation="relu", config=model.config
+            )
+            model.maxpool = nn.Identity()
         
-    #     # Use the model's existing config
-    #     model.conv1 = UnifiedQuantizedConv2dBatchNorm2dReLU(
-    #         3, 64, kernel_size=3, stride=1, padding=1, 
-    #         bias=False, activation="relu", config=model.config
-    #     )
-    #     model.maxpool = nn.Identity()
-    
     model.to(args.device)
 
     # Create optimizer
@@ -148,11 +154,16 @@ def main():
     parser.add_argument("--work-dir", default="./output", type=str)
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu", type=str)
     parser.add_argument("--num-workers", default=4, type=int)
+    
     parser.add_argument("--bits", default=8, type=int)
     parser.add_argument("--switch-iter", default=5000, type=int, 
                        help="Iteration to switch to activation quantization")
     parser.add_argument("--quantization", default="linear", type=str,
                        choices=["linear", "log"], help="Quantization method to use")
+    parser.add_argument("--dataset", default="cifar", type=str,
+                       choices=["cifar", "imagenet"], help="dataset to use")
+    parser.add_argument("--model", default="resnet18", type=str,
+                       choices=["resnet18", "resnet50", "v1", "v2"], help="model to use")
     parser.add_argument("--threshold", default=1e-5, type=float,
                        help="Threshold for log quantization")
     parser.add_argument("--early-stop", default=10, type=int,

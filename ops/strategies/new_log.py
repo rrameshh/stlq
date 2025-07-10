@@ -95,8 +95,42 @@ class LogStrategy(QuantizationStrategy):
             q2[second_word_mask] = q2_selected
             s_err[second_word_mask] = s_err_selected
 
+        result =  LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
+        result = LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
+    
+        # try:
+        #     reconstructed = result.dequantize()
+        #     mse = torch.mean((weight - reconstructed) ** 2).item()
+        #     max_error = torch.max(torch.abs(weight - reconstructed)).item()
+        #     relative_error = (torch.norm(weight - reconstructed) / torch.norm(weight)).item()
+            
+        #     print(f"🔍 RECONSTRUCTION QUALITY:")
+        #     print(f"   Original weight range: [{weight.min().item():.6e}, {weight.max().item():.6e}]")
+        #     print(f"   Reconstructed range: [{reconstructed.min().item():.6e}, {reconstructed.max().item():.6e}]")
+        #     print(f"   MSE: {mse:.6e}")
+        #     print(f"   Max Error: {max_error:.6e}")  
+        #     print(f"   Relative Error: {relative_error:.4f}")
+        #     print(f"   Original norm: {torch.norm(weight).item():.6f}")
+        #     print(f"   Reconstructed norm: {torch.norm(reconstructed).item():.6f}")
+            
+        #     # Check if reconstruction is catastrophically bad
+        #     if relative_error > 0.8:  # More than 80% error
+        #         print(f"🚨 CATASTROPHIC reconstruction quality ({relative_error:.1%}) - falling back to linear")
+        #         from .linear import LinearStrategy
+        #         return LinearStrategy(config).quantize_weight(weight, per_channel=True)
+        #     elif relative_error > 0.3:  # More than 30% error  
+        #         print(f"⚠️  Poor reconstruction quality ({relative_error:.1%})")
+        #     else:
+        #         print(f"✅ Acceptable reconstruction quality ({relative_error:.1%})")
+                
+        # except Exception as e:
+        #     print(f"🚨 Exception during reconstruction check: {e} - falling back to linear")
+        #     from .linear import LinearStrategy
+        #     return LinearStrategy(config).quantize_weight(weight, per_channel=True)
 
-        return LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
+        return result
+
+        # return
     
     def _quantize_weight_per_tensor(self, weight: torch.Tensor, config):
 

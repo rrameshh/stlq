@@ -6,13 +6,12 @@ import torch.nn as nn
 
 from ..base import QuantizedOperatorBase
 from ..tensors.linear import LinearQuantizedTensor
-# from ..tensors.log import LogQuantizedTensor
 from ..tensors.new_log import LogQuantizedTensor
 from ..strategies.factory import create_strategy
 from ..quant_config import QuantizationConfig
 
 # Type alias for any quantized tensor
-QuantizedTensorType = Union[LinearQuantizedTensor, LogQuantizedTensor]
+QuantizedTensorType = Union[LinearQuantizedTensor]
 
 class UnifiedQuantizedOperator(QuantizedOperatorBase):
     """Base class for unified quantization operators that use strategy pattern"""
@@ -102,25 +101,46 @@ class UnifiedQuantizedConv2dBatchNorm2dReLU(UnifiedQuantizedOperator):
         
     def _get_bn2d_mean_and_var(self, input):
         if self.training:
-            conv2d_output = self.conv2d(input)
+            conv2d_output = self.conv2d(input) # get convolved output
             conv2d_output_reshaped = conv2d_output \
-                .transpose(0, 1).reshape(self.conv2d.out_channels, -1)
-            mean = conv2d_output_reshaped.mean(1)
-            var = conv2d_output_reshaped.var(1)
+                .transpose(0, 1).reshape(self.conv2d.out_channels, -1) # switch th 0th and 1st dim and reshape it so that every channel is a list
+            mean = conv2d_output_reshaped.mean(1) # get mean across the 1 dim (columns)
+            var = conv2d_output_reshaped.var(1) # get means across the 1 dim (rows)
         else:
             mean = self.bn2d.running_mean
             var = self.bn2d.running_var
         return mean, var
 
     def _get_fused_weight_and_bias(self, input):
-        mean, var = self._get_bn2d_mean_and_var(input)
-        sqrt_var = torch.sqrt(var + self.bn2d.eps)
+        mean, var = self._get_bn2d_mean_and_var(input) # get mean and variance per channel
+        sqrt_var = torch.sqrt(var + self.bn2d.eps) # sqrt(var + epsilon) to avoid weird division
+        if torch.any(sqrt_var < 1e-6):
+            print(f"WARNING: Very small sqrt_var detected: min={sqrt_var.min().item()}")
         fused_weight = (self.conv2d.weight * 
                        self.bn2d.weight.reshape(self.conv2d.out_channels, 1, 1, 1) / 
                        sqrt_var.reshape(self.conv2d.out_channels, 1, 1, 1))
         
+                        # fused_weight = convolved weight * batchnormalized weight 
+                        # the batch normalized weight is reshaped to be in per channel basically
+                        # divide by the per channel sqrt(var + eps)
+        
         bias = torch.zeros_like(mean) if self.conv2d.bias is None else self.conv2d.bias
+                        # get bias
         fused_bias = (bias - mean) / sqrt_var * self.bn2d.weight + self.bn2d.bias
+                        # fused bias = (bias - mean)/(sqrt(var + epsilon)) * (batch norm weight) + (batch norm bias)
+        if torch.any(torch.isnan(fused_weight)):
+            print(f"NaN in fused_weight detected!")
+            print(f"Conv weight range: [{self.conv2d.weight.min()}, {self.conv2d.weight.max()}]")
+            print(f"BN weight range: [{self.bn2d.weight.min()}, {self.bn2d.weight.max()}]")
+            print(f"sqrt_var range: [{sqrt_var.min()}, {sqrt_var.max()}]")
+            print(f"Is depthwise: {self.conv2d.groups == self.conv2d.in_channels}")
+        
+        if torch.any(torch.isinf(fused_weight)):
+            print(f"Inf in fused_weight detected!")
+        
+        # Check for extreme values that might cause log quantization issues
+        if torch.any(torch.abs(fused_weight) > 1000):
+            print(f"Extreme fused weight values: max_abs={torch.abs(fused_weight).max().item()}")
         
         return fused_weight, fused_bias
 
