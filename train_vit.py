@@ -142,6 +142,16 @@ def setup_vit_training(args):
         attn_drop_rate=args.attn_dropout,
         quantize_classifier=args.quantize_classifier  # NEW: Industry standard option
     )
+
+    if args.pretrained:
+        from networks.load_pretrained import load_pretrained_vit
+        model = load_pretrained_vit(
+            model, 
+            variant=args.vit_variant,
+            num_classes=num_classes,
+            img_size=img_size
+        )
+        print(f"Loaded pretrained ViT-{args.vit_variant} weights")
     
     model.to(args.device)
     
@@ -155,13 +165,11 @@ def setup_vit_training(args):
     )
     
     # Learning rate scheduler - Cosine annealing with warmup
-    def warmup_cosine_schedule(epoch, warmup_epochs=10):
-        if epoch < warmup_epochs:
-            return epoch / warmup_epochs
-        else:
-            return 0.5 * (1 + math.cos(math.pi * (epoch - warmup_epochs) / (args.num_epochs - warmup_epochs)))
+    def hstlq_cosine_schedule(epoch):
+        progress = epoch / args.num_epochs
+        return math.cos(math.pi * progress / 2)
     
-    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_schedule)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=hstlq_cosine_schedule)
     
     # Create quantization switch hook
     switch_hook = SwitchQuantizationModeHook(
@@ -185,7 +193,7 @@ def main():
     parser.add_argument("--attn-dropout", default=0.1, type=float, help="Attention dropout rate")
     
     # Training arguments
-    parser.add_argument("--lr", default=1e-3, type=float, help="Learning rate (ViTs often use lower LR)")
+    parser.add_argument("--lr", default=1e-5, type=float, help="Learning rate (ViTs often use lower LR)")
     parser.add_argument("--weight-decay", default=0.05, type=float, help="Weight decay")
     parser.add_argument("--num-epochs", default=100, type=int)
     parser.add_argument("--early-stop", default=15, type=int)
@@ -200,7 +208,8 @@ def main():
     # NEW: Industry standard quantization options
     parser.add_argument("--quantize-classifier", action="store_true", 
                        help="Quantize classifier head (default: keep FP32 per industry standard)")
-    
+    parser.add_argument("--pretrained", action="store_true", 
+                       help="stores pretrained weights")
     # System arguments
     parser.add_argument("--device", default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--work-dir", default="./output_vit")

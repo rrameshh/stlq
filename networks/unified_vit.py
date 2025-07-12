@@ -1,4 +1,3 @@
-
 # networks/unified_vit.py - Explicit Flow Version
 import torch
 import torch.nn as nn
@@ -65,17 +64,15 @@ class SelectiveQuantizedMultiHeadAttention(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers
-        # self.qkv = UnifiedQuantizedLinear(dim, dim * 3, bias=qkv_bias, config=config)
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        # self.proj = UnifiedQuantizedLinear(dim, dim, bias=qkv_bias, config=config)
-        self.proj = nn.Linear(dim, dim)
+        self.qkv = UnifiedQuantizedLinear(dim, dim * 3, bias=qkv_bias, config=config)
+        self.proj = UnifiedQuantizedLinear(dim, dim, bias=qkv_bias, config=config)
         
         # FP32: Lightweight operations
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj_drop = nn.Dropout(proj_drop)
         
         # Input quantizer for explicit transition management
-        # self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = UnifiedQuantize(config=config)
     
     def forward(self, x):
         """
@@ -95,8 +92,7 @@ class SelectiveQuantizedMultiHeadAttention(nn.Module):
             "Expected FP32 input from LayerNorm"
         
         # Quantize input for heavy compute
-        # x_quantized = self.input_quantizer(x)
-        x_quantized = x
+        x_quantized = self.input_quantizer(x)
         
         # ============ QUANTIZED COMPUTE: QKV PROJECTION ============
         qkv_quantized = self.qkv(x_quantized)
@@ -122,11 +118,10 @@ class SelectiveQuantizedMultiHeadAttention(nn.Module):
         
         # ============ EXPLICIT TRANSITION 3: FP32 → INT8 → FP32 ============
         # Quantize for heavy output projection
-        # out_quantized = self.input_quantizer(out)
+        out_quantized = self.input_quantizer(out)
         
         # Quantized projection
-        # out_proj_quantized = self.proj(out_quantized)
-        out_proj_quantized = self.proj(out)
+        out_proj_quantized = self.proj(out_quantized)
         
         # Dequantize for next layer (residual connection needs FP32)
         if isinstance(out_proj_quantized, LinearQuantizedTensor):
@@ -155,18 +150,15 @@ class SelectiveQuantizedMLP(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers
-        # self.fc1 = UnifiedQuantizedLinear(in_features, hidden_features, config=config)
-        # self.fc2 = UnifiedQuantizedLinear(hidden_features, out_features, config=config)
-
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.fc1 = UnifiedQuantizedLinear(in_features, hidden_features, config=config)
+        self.fc2 = UnifiedQuantizedLinear(hidden_features, out_features, config=config)
         
         # FP32: Activation and dropout
         self.act = act_layer() if act_layer else nn.GELU()
         self.drop = nn.Dropout(drop)
         
         # Input quantizer for explicit transition management
-        # self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = UnifiedQuantize(config=config)
     
     def forward(self, x):
         """
@@ -184,8 +176,7 @@ class SelectiveQuantizedMLP(nn.Module):
             "Expected FP32 input from LayerNorm"
         
         # Quantize input for heavy compute
-        # x_quantized = self.input_quantizer(x)
-        x_quantized  = x
+        x_quantized = self.input_quantizer(x)
         
         # ============ QUANTIZED COMPUTE: FC1 ============
         x_quantized = self.fc1(x_quantized)
@@ -202,11 +193,10 @@ class SelectiveQuantizedMLP(nn.Module):
         
         # ============ EXPLICIT TRANSITION 3: FP32 → INT8 → FP32 ============
         # Quantize for heavy compute
-        # x_quantized = self.input_quantizer(x_fp32)
+        x_quantized = self.input_quantizer(x_fp32)
         
         # Quantized FC2
-        # x_quantized = self.fc2(x_quantized)
-        x_quantized = self.fc2(x_fp32)
+        x_quantized = self.fc2(x_quantized)
         
         # Dequantize for next layer
         if isinstance(x_quantized, LinearQuantizedTensor):
