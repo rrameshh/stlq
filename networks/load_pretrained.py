@@ -536,3 +536,105 @@ def load_pretrained_vit_base(model, **kwargs):
 
 def load_pretrained_vit_large(model, **kwargs):
     return load_pretrained_vit(model, variant="large", **kwargs)
+
+
+# Add to networks/load_pretrained.py
+
+def load_pretrained_deit(model, variant="small", num_classes=100, img_size=224):
+    """
+    Load pretrained DeiT weights - EFFICIENT: Reuses ViT weight loading!
+    
+    DeiT weights from timm include the distillation token, so we can load them directly.
+    """
+    print(f"Loading pretrained DeiT-{variant} weights...")
+    
+    # Map DeiT variants to timm model names
+    timm_model_names = {
+        "tiny": "deit_tiny_patch16_224",
+        "small": "deit_small_patch16_224", 
+        "base": "deit_base_patch16_224",
+    }
+    
+    if variant not in timm_model_names:
+        raise ValueError(f"Unknown DeiT variant: {variant}. Available: {list(timm_model_names.keys())}")
+    
+    # Load pretrained DeiT model from timm
+    timm_model_name = timm_model_names[variant]
+    try:
+        pretrained_model = timm.create_model(timm_model_name, pretrained=True, img_size=img_size)
+        print(f"Successfully loaded {timm_model_name} from timm")
+    except Exception as e:
+        print(f"Failed to load DeiT from timm: {e}")
+        print("Falling back to ViT weights (will miss distillation token)")
+        # Fallback to ViT weights
+        return load_pretrained_vit(model, variant, num_classes, img_size)
+    
+    pretrained_dict = pretrained_model.state_dict()
+    custom_dict = model.state_dict()
+    
+    # Create weight mapping (reuses ViT mapping + distillation token)
+    weight_mapping = _create_deit_weight_mapping(pretrained_dict, custom_dict, variant)
+    
+    # Transfer weights (reuses ViT transfer function)
+    transferred, skipped, errors = _transfer_vit_weights(
+        pretrained_dict, custom_dict, weight_mapping, num_classes
+    )
+    
+    print(f"DeiT weight transfer summary:")
+    print(f"  Transferred: {transferred}")
+    print(f"  Skipped: {skipped}") 
+    print(f"  Errors: {errors}")
+    
+    # Load the updated state dict
+    model.load_state_dict(custom_dict)
+    
+    # Reset quantization parameters (reuses ViT function)
+    _reset_vit_quantization_params(model)
+    
+    return model
+
+
+def _create_deit_weight_mapping(pretrained_dict, custom_dict, variant):
+    """
+    Create DeiT weight mapping - EFFICIENT: Extends ViT mapping
+    """
+    # Start with ViT mapping (reuses existing function!)
+    weight_mapping = _create_vit_weight_mapping(pretrained_dict, custom_dict, variant)
+    
+    # Add DeiT-specific mappings
+    
+    # 1. Distillation token
+    weight_mapping.update({
+        'dist_token': 'dist_token',
+    })
+    
+    # 2. Position embeddings (already handled by ViT mapping, but DeiT has 2 tokens)
+    # The pos_embed will be handled automatically since both have same key name
+    
+    # 3. Dual classification heads
+    if 'head_dist.weight' in pretrained_dict:
+        # Check if custom model has quantized heads
+        if 'head_cls.linear.weight' in custom_dict:
+            # Quantized heads
+            weight_mapping.update({
+                'head.weight': 'head_cls.linear.weight',      # Main classifier
+                'head.bias': 'head_cls.linear.bias',
+                'head_dist.weight': 'head_dist.linear.weight', # Distillation classifier  
+                'head_dist.bias': 'head_dist.linear.bias',
+            })
+        else:
+            # FP32 heads
+            weight_mapping.update({
+                'head.weight': 'head_cls.weight',       # Main classifier
+                'head.bias': 'head_cls.bias', 
+                'head_dist.weight': 'head_dist.weight', # Distillation classifier
+                'head_dist.bias': 'head_dist.bias',
+            })
+    
+    # Remove the old single head mapping if it exists
+    if 'head.weight' in weight_mapping and 'head_cls.weight' in custom_dict:
+        # We now have dual heads, so remove old single head mapping
+        pass
+    
+    print(f"🔍 Created {len(weight_mapping)} DeiT weight mappings (including distillation token)")
+    return weight_mapping

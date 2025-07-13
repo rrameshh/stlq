@@ -7,6 +7,7 @@ from .unified_vit import (
     # vit_base_patch16_224 as unified_vit_base,
     # vit_large_patch16_224 as unified_vit_large
 )
+from .unified_deit import deit_tiny, deit_small, deit_base
 
 
 def resnet18(quantization_method="linear", **kwargs):
@@ -72,22 +73,13 @@ def vit_small(quantization_method="linear", **kwargs):
     """
     return unified_vit_small(quantization_method=quantization_method, **kwargs)
 
-def vit_base(quantization_method="linear", **kwargs):
-    """
-    Create ViT-Base with any quantization method.
-    
-    Args:
-        quantization_method: "linear" or "log"
-        **kwargs: device, threshold, num_classes, etc.
-    """
-    return unified_vit_base(quantization_method=quantization_method, **kwargs)
 
-def vit_large(quantization_method="linear", **kwargs):
-    """
-    Create ViT-Large with any quantization method.
-    
-    Args:
-        quantization_method: "linear" or "log"
-        **kwargs: device, threshold, num_classes, etc.
-    """
-    return unified_vit_large(quantization_method=quantization_method, **kwargs)
+
+def deit_tiny_model(quantization_method="linear", **kwargs):
+    return deit_tiny(quantization_method=quantization_method, **kwargs)
+
+def deit_small_model(quantization_method="linear", **kwargs):
+    return deit_small(quantization_method=quantization_method, **kwargs)
+
+def deit_base_model(quantization_method="linear", **kwargs):
+    return deit_base(quantization_method=quantization_method, **kwargs)

@@ -10,6 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+os.environ["HF_DATASETS_CACHE"] = "/scratch/roshnir-profile/qat/qat/hf_cache"
+os.environ["HF_DATASETS_CACHE"] = "/scratch/roshnir-profile/qat/qat/hf_cache"
+
 
 # Import your existing data loaders
 from data.cifar import get_cifar10_dataloaders
@@ -201,7 +204,7 @@ def main():
     # Quantization arguments
     parser.add_argument("--quantization", default="linear", choices=["linear", "log"])
     parser.add_argument("--bits", default=8, type=int)
-    parser.add_argument("--switch-iter", default=5000, type=int, 
+    parser.add_argument("--switch-iter", default=50000, type=int, 
                        help="Iteration to switch to activation quantization")
     parser.add_argument("--threshold", default=1e-5, type=float)
     
