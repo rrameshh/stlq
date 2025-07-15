@@ -8,10 +8,6 @@ import math
 from ops.layers.all import (
     UnifiedQuantize,
     UnifiedQuantizedLinear,
-    UnifiedQuantizedAdd,
-    UnifiedQuantizedReLU,
-    UnifiedQuantizedOperator,
-    UnifiedQuantizedConv2dBatchNorm2dReLU
 )
 from ops.quant_config import QuantizationConfig
 from ops.tensors.linear import LinearQuantizedTensor
@@ -157,7 +153,7 @@ class SelectiveQuantizedMLP(nn.Module):
         self.act = act_layer() if act_layer else nn.GELU()
         self.drop = nn.Dropout(drop)
         
-        # Input quantizer for explicit transition management
+        # Input quantizer
         self.input_quantizer = UnifiedQuantize(config=config)
     
     def forward(self, x):

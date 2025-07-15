@@ -13,6 +13,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 # Set cache directory
 os.environ["HF_DATASETS_CACHE"] = "/scratch/roshnir-profile/qat/qat/hf_cache"
+os.environ["TORCH_HOME"] = "/scratch/roshnir-profile/torch_cache"
+
 
 # Import data loaders
 from data.cifar import get_cifar10_dataloaders
