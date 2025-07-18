@@ -282,11 +282,135 @@ def _transfer_weights(model, pretrained_dict, custom_dict, weight_mapping, num_c
     return model
 
 
+def load_pretrained_mobilenetv3(model, variant="large", num_classes=100):
+    """
+    Load pretrained MobileNetV3 weights from torchvision into custom quantized model
+    """
+    print(f"Loading pretrained MobileNetV3-{variant} weights...")
+    
+    import torchvision.models as models
+    
+    # Load pretrained model from torchvision
+    if variant == "large":
+        pretrained_model = models.mobilenet_v3_large(pretrained=True)
+    elif variant == "small":
+        pretrained_model = models.mobilenet_v3_small(pretrained=True)
+    else:
+        raise ValueError(f"Unknown MobileNetV3 variant: {variant}")
+    
+    pretrained_dict = pretrained_model.state_dict()
+    custom_dict = model.state_dict()
+    weight_mapping = {}
+    
+    # First conv layer
+    weight_mapping.update({
+        'features.0.0.weight': 'features.0.conv2d.weight',
+        'features.0.1.weight': 'features.0.bn2d.weight',
+        'features.0.1.bias': 'features.0.bn2d.bias',
+        'features.0.1.running_mean': 'features.0.bn2d.running_mean',
+        'features.0.1.running_var': 'features.0.bn2d.running_var',
+        'features.0.1.num_batches_tracked': 'features.0.bn2d.num_batches_tracked',
+    })
+    
+    # Get the number of inverted residual blocks
+    num_blocks = len([k for k in custom_dict.keys() if 'features.' in k and '.conv.' in k]) // 3
+    
+    # Map inverted residual blocks
+    pretrained_block_idx = 1  # Start from features.1 in pretrained model
+    custom_block_idx = 1      # Start from features.1 in custom model
+    
+    while pretrained_block_idx < 16 and custom_block_idx < len(model.features) - 1:  # -1 for last conv
+        pretrained_prefix = f'features.{pretrained_block_idx}'
+        custom_prefix = f'features.{custom_block_idx}'
+        
+        # Check if this is an inverted residual block in pretrained model
+        if f'{pretrained_prefix}.block.0.0.weight' in pretrained_dict:
+            # Expansion conv (if exists)
+            if f'{pretrained_prefix}.block.0.0.weight' in pretrained_dict:
+                weight_mapping.update({
+                    f'{pretrained_prefix}.block.0.0.weight': f'{custom_prefix}.conv.0.conv2d.weight',
+                    f'{pretrained_prefix}.block.0.1.weight': f'{custom_prefix}.conv.0.bn2d.weight',
+                    f'{pretrained_prefix}.block.0.1.bias': f'{custom_prefix}.conv.0.bn2d.bias',
+                    f'{pretrained_prefix}.block.0.1.running_mean': f'{custom_prefix}.conv.0.bn2d.running_mean',
+                    f'{pretrained_prefix}.block.0.1.running_var': f'{custom_prefix}.conv.0.bn2d.running_var',
+                    f'{pretrained_prefix}.block.0.1.num_batches_tracked': f'{custom_prefix}.conv.0.bn2d.num_batches_tracked',
+                })
+                conv_offset = 1
+            else:
+                conv_offset = 0
+            
+            # Depthwise conv
+            weight_mapping.update({
+                f'{pretrained_prefix}.block.{conv_offset}.0.weight': f'{custom_prefix}.conv.{conv_offset}.conv2d.weight',
+                f'{pretrained_prefix}.block.{conv_offset}.1.weight': f'{custom_prefix}.conv.{conv_offset}.bn2d.weight',
+                f'{pretrained_prefix}.block.{conv_offset}.1.bias': f'{custom_prefix}.conv.{conv_offset}.bn2d.bias',
+                f'{pretrained_prefix}.block.{conv_offset}.1.running_mean': f'{custom_prefix}.conv.{conv_offset}.bn2d.running_mean',
+                f'{pretrained_prefix}.block.{conv_offset}.1.running_var': f'{custom_prefix}.conv.{conv_offset}.bn2d.running_var',
+                f'{pretrained_prefix}.block.{conv_offset}.1.num_batches_tracked': f'{custom_prefix}.conv.{conv_offset}.bn2d.num_batches_tracked',
+            })
+            
+            # SE module (if exists) - skip for now as it's complex
+            se_offset = 0
+            if f'{pretrained_prefix}.block.{conv_offset+1}.fc1.weight' in pretrained_dict:
+                se_offset = 1
+                # Could map SE weights here if needed
+            
+            # Projection conv
+            final_conv_idx = conv_offset + 1 + se_offset
+            weight_mapping.update({
+                f'{pretrained_prefix}.block.{final_conv_idx}.0.weight': f'{custom_prefix}.conv.{-1}.conv2d.weight',
+                f'{pretrained_prefix}.block.{final_conv_idx}.1.weight': f'{custom_prefix}.conv.{-1}.bn2d.weight',
+                f'{pretrained_prefix}.block.{final_conv_idx}.1.bias': f'{custom_prefix}.conv.{-1}.bn2d.bias',
+                f'{pretrained_prefix}.block.{final_conv_idx}.1.running_mean': f'{custom_prefix}.conv.{-1}.bn2d.running_mean',
+                f'{pretrained_prefix}.block.{final_conv_idx}.1.running_var': f'{custom_prefix}.conv.{-1}.bn2d.running_var',
+                f'{pretrained_prefix}.block.{final_conv_idx}.1.num_batches_tracked': f'{custom_prefix}.conv.{-1}.bn2d.num_batches_tracked',
+            })
+        
+        pretrained_block_idx += 1
+        custom_block_idx += 1
+    
+    # Last conv layer
+    last_features_idx = len(model.features) - 1
+    if variant == "large":
+        weight_mapping.update({
+            'features.16.0.weight': f'features.{last_features_idx}.conv2d.weight',
+            'features.16.1.weight': f'features.{last_features_idx}.bn2d.weight',
+            'features.16.1.bias': f'features.{last_features_idx}.bn2d.bias',
+            'features.16.1.running_mean': f'features.{last_features_idx}.bn2d.running_mean',
+            'features.16.1.running_var': f'features.{last_features_idx}.bn2d.running_var',
+            'features.16.1.num_batches_tracked': f'features.{last_features_idx}.bn2d.num_batches_tracked',
+        })
+    
+    # Classifier
+    if num_classes == 1000:
+        if variant == "large":
+            # MobileNetV3-Large has pre_classifier
+            weight_mapping.update({
+                'classifier.0.weight': 'pre_classifier.linear.weight',
+                'classifier.0.bias': 'pre_classifier.linear.bias',
+                'classifier.3.weight': 'classifier.linear.weight',
+                'classifier.3.bias': 'classifier.linear.bias',
+            })
+        else:
+            # MobileNetV3-Small direct classifier
+            weight_mapping.update({
+                'classifier.0.weight': 'classifier.linear.weight',
+                'classifier.0.bias': 'classifier.linear.bias',
+            })
+    
+    return _transfer_weights(model, pretrained_dict, custom_dict, weight_mapping, num_classes)
+
+
+# Update the main load_pretrained_mobilenet function
 def load_pretrained_mobilenet(model, mobilenet_version="v2", num_classes=100):
     if mobilenet_version == "v1":
         return load_pretrained_mobilenetv1(model, num_classes)
     elif mobilenet_version == "v2":
         return load_pretrained_mobilenetv2(model, num_classes)
+    elif mobilenet_version == "v3_large":
+        return load_pretrained_mobilenetv3(model, variant="large", num_classes=num_classes)
+    elif mobilenet_version == "v3_small":
+        return load_pretrained_mobilenetv3(model, variant="small", num_classes=num_classes)
     else:
         raise ValueError(f"Unknown MobileNet version: {mobilenet_version}")
 

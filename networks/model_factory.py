@@ -6,6 +6,8 @@ from .unified_vit import (
     industry_vit_base as unified_vit_base,
     industry_vit_large as unified_vit_large
 )
+from .unified_mobilenetv3 import mobilenetv3_large_factory, mobilenetv3_small_factory
+
 from .unified_deit import deit_tiny, deit_small, deit_base
 
 
@@ -50,6 +52,12 @@ def mobilenetv2(quantization_method="linear", **kwargs):
     """
     return unified_mobilenetv2(quantization_method=quantization_method, **kwargs)
 
+
+def mobilenetv3_small(quantization_method="linear", **kwargs):
+    return mobilenetv3_small_factory(quantization_method=quantization_method, **kwargs)
+
+def mobilenetv3_large(quantization_method="linear", **kwargs):
+    return mobilenetv3_large_factory(quantization_method=quantization_method, **kwargs)
 
 # ViT models  
 def vit_tiny(quantization_method="linear", **kwargs):

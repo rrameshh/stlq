@@ -37,6 +37,14 @@ class LinearQuantizedTensor(QuantizedTensorBase):
             None if self.r is None else func(self.r)
         )
     
+    def view (self, *shape):
+        new_q = self.q.view(*shape)
+        new_r = self.r.view(*shape) if self.r is not None else None
+
+        return LinearQuantizedTensor(new_q, self.s, self.z, new_r)
+
+
+
     @property
     def shape(self):
         return self.q.shape

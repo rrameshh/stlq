@@ -86,6 +86,26 @@ def setup_training_components(args):
             bits=args.bits,
             width_multiplier=args.width_multiplier
         )
+    elif args.mobilenet_version == "v3_large":
+        from networks.unified_mobilenetv3 import mobilenetv3_large
+        model = mobilenetv3_large(
+            quantization_method=args.quantization,
+            num_classes=num_classes,
+            device=args.device,
+            threshold=args.threshold,
+            bits=args.bits,
+            width_multiplier=args.width_multiplier
+        )
+    elif args.mobilenet_version == "v3_small":
+        from networks.unified_mobilenetv3 import mobilenetv3_small
+        model = mobilenetv3_small(
+            quantization_method=args.quantization,
+            num_classes=num_classes,
+            device=args.device,
+            threshold=args.threshold,
+            bits=args.bits,
+            width_multiplier=args.width_multiplier
+        )
     else:
         raise ValueError(f"Unknown MobileNet version: {args.mobilenet_version}")
     
@@ -191,7 +211,7 @@ def main():
     parser = argparse.ArgumentParser("Train QAT MobileNet")
     
     # Model arguments
-    parser.add_argument("--mobilenet-version", default="v2", type=str, choices=["v1", "v2"],
+    parser.add_argument("--mobilenet-version", default="v2", type=str, choices=["v1", "v2", "v3_large", "v3_small"],
                        help="MobileNet version to use")
     parser.add_argument("--width-multiplier", default=1.0, type=float,
                        help="Width multiplier for MobileNet")

@@ -28,13 +28,16 @@ class UnifiedQuantizedConvBatchNormUnfused(UnifiedQuantizedOperator):
         self.bn2d = nn.BatchNorm2d(out_channels, device=config.device)
         assert self.conv2d.padding_mode == "zeros"
         self.activation = activation
-        assert self.activation in ["relu", None]
+        assert self.activation in ["relu", "hardswish", None], f"Unsupported activation: {self.activation}"
 
     def _apply_activation(self, output):
         if self.activation == "relu":
             return F.relu(output)
+        elif self.activation == "hardswish":
+            return F.hardswish(output)
         elif self.activation is None:
             return output
+        
 
     def _quantize_weight(self, weight: torch.Tensor):
         """Use strategy for weight quantization"""
