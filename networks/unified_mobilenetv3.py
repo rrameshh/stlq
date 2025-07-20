@@ -366,7 +366,7 @@ class UnifiedMobileNetV3(nn.Module):
         else:
             x = self.classifier(x)
         
-        # x = self._dequantize(x)
+        x = self._dequantize(x)
         return x
 
 

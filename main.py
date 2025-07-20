@@ -425,13 +425,13 @@ class SwitchQuantizationModeHook:
     def after_train_iter(self, iteration):
         if iteration + 1 == self.switch_iter and not self.switched:
             print(f"🔄 Iteration {iteration+1}: Switching to activation quantization")
-            print("\nBefore enabling quantization:")
-            print_quantization_status(self.model)
+            # print("\nBefore enabling quantization:")
+            # print_quantization_status(self.model)
                     
-            enable_quantization(self.model)
+            # enable_quantization(self.model)
             
-            print("\nAfter enabling quantization:")
-            print_quantization_status(self.model)
+            # print("\nAfter enabling quantization:")
+            # print_quantization_status(self.model)
             self.switched = True
             return True
         return False
