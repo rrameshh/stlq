@@ -21,6 +21,8 @@ from data.text_datasets import (  # NEW: Text dataset support
     generate_text,
     compute_perplexity
 )
+from data.text_classification import get_imdb_dataloaders, get_sst2_dataloaders, validate_tinybert
+
 
 # Import QAT utilities
 from ops import enable_quantization, disable_quantization, print_quantization_status
@@ -45,11 +47,14 @@ class UniversalQATTrainer:
         work_dir = f"{self.args.work_dir}_{self.args.model_name}_{self.args.quantization}"
         
         # Add dataset info to work dir
-        if hasattr(self.args, 'dataset'):
-            work_dir += f"_{self.args.dataset}"
-        if hasattr(self.args, 'text_dataset'):
+        if self.args.model_type == 'tinygpt':
             work_dir += f"_{self.args.text_dataset}"
-            
+        elif self.args.model_type == 'tinybert':
+            work_dir += f"_{self.args.text_classification_dataset}"
+        else:
+            # Vision models
+            work_dir += f"_{self.args.dataset}"
+                
         # Special flags
         if getattr(self.args, 'use_teacher', False):
             work_dir += f"_{self.args.teacher_type}teacher"
@@ -66,6 +71,8 @@ class UniversalQATTrainer:
         if self.args.model_type == 'tinygpt':
             # Text datasets for language modeling
             self._setup_text_data_loaders()
+        elif self.args.model_type == 'tinybert':
+            self._setup_text_classification_data_loaders()
         else:
             # Vision datasets for image classification
             self._setup_vision_data_loaders()
@@ -107,6 +114,29 @@ class UniversalQATTrainer:
         print(f" Vocab size: {self.vocab_size}")
         print(f" Sequence length: {self.args.seq_len}")
         print(f" Character-level: {self.args.char_level}")
+
+    def _setup_text_classification_data_loaders(self):
+        """Setup text classification data loaders for TinyBERT"""
+        if self.args.text_classification_dataset == "imdb":
+            self.train_loader, self.test_loader, self.num_classes = get_imdb_dataloaders(
+                batch_size=self.args.batch_size,
+                max_length=self.args.seq_len,  # reuse seq_len arg
+                num_workers=self.args.num_workers
+            )
+        elif self.args.text_classification_dataset == "sst2":
+            self.train_loader, self.test_loader, self.num_classes = get_sst2_dataloaders(
+                batch_size=self.args.batch_size,
+                max_length=self.args.seq_len,
+                num_workers=self.args.num_workers
+            )
+        else:
+            raise ValueError(f"Unknown text classification dataset: {self.args.text_classification_dataset}")
+        
+        self.is_language_model = False  # TinyBERT is classification, not language modeling
+        
+        print(f" Text classification dataset: {self.args.text_classification_dataset}")
+        print(f" Number of classes: {self.num_classes}")
+        print(f" Max sequence length: {self.args.seq_len}")
     
     def _setup_vision_data_loaders(self):
         """Setup vision data loaders for CNN/ViT models"""
@@ -132,7 +162,6 @@ class UniversalQATTrainer:
         model_kwargs = self._get_model_kwargs()
         
         if self.args.model_type == 'tinygpt':
-            # NEW: TinyGPT model creation
             from networks.model_factory import tinygpt_nano, tinygpt_micro, tinygpt_mini, tinygpt_small
             
             if self.args.model_variant == 'nano':
@@ -145,6 +174,21 @@ class UniversalQATTrainer:
                 self.model = tinygpt_small(**model_kwargs)
             else:
                 raise ValueError(f"Unknown TinyGPT variant: {self.args.model_variant}")
+            
+        elif self.args.model_type == 'tinybert':
+            # TinyBERT model creation
+            from networks.model_factory import tinybert_base, tinybert_mini, tinybert_small, tinybert_tiny
+
+            if self.args.model_variant == 'tiny':
+                self.model = tinybert_tiny(**model_kwargs)
+            elif self.args.model_variant == 'mini':
+                self.model = tinybert_mini(**model_kwargs)
+            elif self.args.model_variant == 'small':
+                self.model = tinybert_small(**model_kwargs)
+            elif self.args.model_variant == 'base':
+                self.model = tinybert_base(**model_kwargs)
+            else:
+                raise ValueError(f"Unknown TinyBERT variant: {self.args.model_variant}")
                 
         elif self.args.model_type == 'resnet':
             from networks.model_factory import resnet18, resnet50
@@ -191,6 +235,18 @@ class UniversalQATTrainer:
                 self.model = deit_base_model(**model_kwargs)
             else:
                 raise ValueError(f"Unknown DeiT variant: {self.args.model_variant}")
+            
+
+        elif self.args.model_type == 'swin':
+            from networks.model_factory import swin_tiny_model, swin_small_model, swin_base_model
+            if self.args.model_variant == 'tiny':
+                self.model = swin_tiny_model(**model_kwargs)
+            elif self.args.model_variant == 'small':
+                self.model = swin_small_model(**model_kwargs)
+            elif self.args.model_variant == 'base':
+                self.model = swin_base_model(**model_kwargs)
+            else:
+                raise ValueError(f"Unknown Swin variant: {self.args.model_variant}")
         else:
             raise ValueError(f"Unknown model type: {self.args.model_type}")
             
@@ -221,6 +277,15 @@ class UniversalQATTrainer:
                 'dropout': self.args.dropout,
                 'quantize_classifier': self.args.quantize_classifier
             })
+        elif self.args.model_type == 'tinybert':
+            # TinyBERT-specific parameters  
+            kwargs.update({
+                'vocab_size': 30522,  # BERT vocab size
+                'max_position_embeddings': self.args.seq_len,
+                'num_classes': self.num_classes,
+                'dropout': self.args.dropout,
+                'quantize_classifier': self.args.quantize_classifier
+            })
         else:
             # Vision model parameters
             kwargs.update({
@@ -228,7 +293,7 @@ class UniversalQATTrainer:
             })
             
             # Model-specific parameters for vision models
-            if self.args.model_type in ['vit', 'deit']:
+            if self.args.model_type in ['vit', 'deit', 'swin']:
                 kwargs.update({
                     'img_size': self.img_size,
                     'patch_size': 4 if self.img_size == 32 else 16,
@@ -333,7 +398,7 @@ class UniversalQATTrainer:
     def setup_training_components(self):
         """Setup optimizer, scheduler, loss function, etc."""
         # Optimizer - Auto-detect best for model type
-        if self.args.model_type in ['vit', 'deit', 'tinygpt']:
+        if self.args.model_type in ['vit', 'deit', 'tinygpt', 'tinybert']:
             # Transformers prefer AdamW
             self.optimizer = optim.AdamW(
                 self.model.parameters(),
@@ -389,10 +454,18 @@ class UniversalQATTrainer:
     def train(self):
         """Main training loop"""
         model_desc = f"{self.args.model_type}-{self.args.model_variant}"
+        # if self.is_language_model:
+        #     dataset_desc = f"{self.args.text_dataset} ({'char' if self.args.char_level else 'word'}-level)"
+        # else:
+        #     dataset_desc = f"{self.args.dataset} ({self.num_classes} classes)"
+
         if self.is_language_model:
             dataset_desc = f"{self.args.text_dataset} ({'char' if self.args.char_level else 'word'}-level)"
+        elif self.args.model_type == 'tinybert':
+            dataset_desc = f"{self.args.text_classification_dataset} ({self.num_classes} classes)"
         else:
             dataset_desc = f"{self.args.dataset} ({self.num_classes} classes)"
+
             
         print(f" Starting training: {model_desc}")
         print(f" Dataset: {dataset_desc}")
@@ -431,6 +504,14 @@ class UniversalQATTrainer:
                 if is_best:
                     best_metric = val_metric
                     print(f"New best perplexity: {val_metric:.2f}")
+
+            elif self.args.model_type == 'tinybert':
+                val_metric = validate_tinybert(self.model, self.test_loader, epoch, self.writer, self.args.device)
+                is_best = val_metric > best_metric  # Higher accuracy is better
+                if is_best:
+                    best_metric = val_metric
+                    print(f"New best accuracy: {val_metric:.2f}%")
+            
             else:
                 val_metric = validate(self.model, self.test_loader, epoch, self.writer)
                 is_best = val_metric > best_metric  # Higher accuracy is better
@@ -507,7 +588,27 @@ class UniversalQATTrainer:
                 
                 # Update metrics
                 metrics.update(loss.item(), logits_flat, targets_flat)
+            elif self.args.model_type == 'tinybert':
+                # Text classification: TinyBERT
+                input_ids, attention_mask, labels = data
+                input_ids = input_ids.to(self.args.device)
+                attention_mask = attention_mask.to(self.args.device)
+                labels = labels.to(self.args.device)
                 
+                # Forward pass
+                self.optimizer.zero_grad()
+                logits, loss = self.model(input_ids, attention_mask, labels=labels)
+                
+                # Backward pass
+                loss.backward()
+                
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
+                self.optimizer.step()
+                
+                # Update metrics
+                metrics.update(loss.item(), logits, labels) 
             else:
                 # Vision models: standard classification
                 inputs, targets = data
@@ -621,11 +722,18 @@ def create_parser() -> argparse.ArgumentParser:
     
     # Model arguments
     parser.add_argument("--model-type", required=True, 
-                       choices=["resnet", "mobilenet", "vit", "deit", "tinygpt"], 
+                       choices=["resnet", "mobilenet", "vit", "deit", "swin", "tinygpt", "tinybert"], 
                        help="Model architecture type")
     parser.add_argument("--model-variant", required=True, 
-                       help="Model variant: 18/50 (resnet), v1/v2/v3_small/v3_large (mobilenet), tiny/small/base/large (vit/deit), nano/micro/mini/small (tinygpt)")
-    
+                        help=(
+                            "Model variant: 18/50 (resnet), "
+                            "v1/v2/v3_small/v3_large (mobilenet), "
+                            "tiny/small/base/large (vit/deit), "
+                            "tiny/small/base (swin), "
+                            "nano/micro/mini/small (tinygpt), "
+                            "tiny/mini/small/base (tinybert)"
+                        ))
+        
     # Dataset arguments
     parser.add_argument("--dataset", default="cifar10", 
                        choices=["cifar10", "imagenet100"],
@@ -633,6 +741,10 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--text-dataset", default="shakespeare",
                        choices=["shakespeare", "wikitext", "custom"],
                        help="Text dataset (for TinyGPT)")
+    parser.add_argument("--text-classification-dataset", default="sst2",
+                       choices=["imdb", "sst2"],
+                       help="Text classification dataset (for TinyBERT)")
+    
     parser.add_argument("--text-file", type=str,
                        help="Path to custom text file (when text-dataset=custom)")
     parser.add_argument("--char-level", action="store_true",
@@ -688,7 +800,10 @@ def main():
     
     # Validation
     if args.model_type == 'tinygpt' and not hasattr(args, 'text_dataset'):
-        args.text_dataset = 'shakespeare'  # Default for TinyGPT
+        args.text_dataset = 'shakespeare'
+
+    if args.model_type == 'tinybert' and not hasattr(args, 'text_classification_dataset'):
+        args.text_classification_dataset = 'sst2' 
     
     if args.text_dataset == 'custom' and not args.text_file:
         raise ValueError("--text-file required when --text-dataset=custom")
@@ -696,7 +811,10 @@ def main():
     # Auto-adjust learning rate for different model types
     if args.model_type == 'tinygpt' and args.lr == 0.01:
         args.lr = 3e-4  # Better default for language models
-        print(f"🔧 Auto-adjusted LR to {args.lr} for TinyGPT")
+        print(f"Auto-adjusted LR to {args.lr} for TinyGPT")
+    if args.model_type == 'tinybert' and args.lr == 0.01:
+        args.lr = 1e-4  # Better default for language models
+        print(f"Auto-adjusted LR to {args.lr} for TinyBERT")
     
     # Create trainer and run
     trainer = UniversalQATTrainer(args)
