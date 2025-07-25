@@ -29,51 +29,7 @@ def _make_divisible(v, divisor=8, min_value=None):
     return new_v
 
 
-# class SEModule(nn.Module):
-#     """Squeeze-and-Excitation module for MobileNetV3"""
-    
-#     def __init__(self, channels, reduction=4, config: QuantizationConfig = None):
-#         super().__init__()
-#         reduced_channels = _make_divisible(channels // reduction)
-        
-#         # Use AdaptiveAvgPool2d for global average pooling
-#         # self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
-#         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        
-#         # SE layers - typically kept in FP32 for numerical stability
-#         # but you could quantize them if needed
-#         self.fc1 = nn.Linear(channels, reduced_channels)
-#         self.fc2 = nn.Linear(reduced_channels, channels)
-        
-#         # For quantized version, uncomment these:
-#         # self.fc1 = UnifiedQuantizedLinear(channels, reduced_channels, config=config)
-#         # self.fc2 = UnifiedQuantizedLinear(reduced_channels, channels, config=config)
-        
-#         self.hardsigmoid = nn.Hardsigmoid(inplace=True)
-        
-#     def forward(self, x):
-#         if hasattr(x, 'r') and x.r is not None:
-#             x_float = x.r  # Gradient-enabled values
-#         else:
-#             # For regular tensors or fallback
-#             x_float = x if isinstance(x, torch.Tensor) else x.dequantize()
-                
-#         b, c, h, w = x_float.shape
-        
-#         # SE computation in FP32
-#         se = self.avgpool(x_float)  # [B, C, 1, 1]
-#         se = se.view(b, c)  # [B, C]
-#         se = F.relu(self.fc1(se))
-#         se = self.hardsigmoid(self.fc2(se))
-#         se = se.view(b, c, 1, 1)
-        
-#         result = x_float * se
-#         return result
-
 class SEModule(nn.Module):
-    """
-    EXPLICIT FLOW: SE module with clear transitions like ViT attention
-    """
     
     def __init__(self, channels, reduction=4, config: QuantizationConfig = None):
         super().__init__()

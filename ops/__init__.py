@@ -5,7 +5,7 @@ from .quant_config import QuantizationConfig
 # Import tensor implementations
 try:
     from .tensors.linear import LinearQuantizedTensor
-    from .tensors.log import LogQuantizedTensor
+    from .tensors.new_log import LogQuantizedTensor
 except ImportError:
     pass
 
@@ -13,13 +13,13 @@ except ImportError:
 try:
     from .strategies.factory import create_strategy
     from .strategies.linear import LinearStrategy
-    from .strategies.log import LogStrategy
+    from .strategies.new_log import LogStrategy
 except ImportError:
     pass
 
 # Import unified layers
 try:
-    from .unified import (
+    from .layers.all import (
         UnifiedQuantize, UnifiedQuantizedConv2dBatchNorm2dReLU, 
         UnifiedQuantizedLinear, UnifiedQuantizedAdd, UnifiedQuantizedReLU,
         UnifiedQuantizedMaxPool2d, UnifiedQuantizedAdaptiveAvgPool2d,

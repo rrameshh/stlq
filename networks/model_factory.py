@@ -10,6 +10,9 @@ from .unified_mobilenetv3 import mobilenetv3_large_factory, mobilenetv3_small_fa
 
 from .unified_deit import deit_tiny, deit_small, deit_base
 from .unified_tiny_gpt import tiny_gpt_micro, tiny_gpt_mini, tiny_gpt_nano, tiny_gpt_small
+from .unified_tiny_bert import tiny_bert_base, tiny_bert_mini, tiny_bert_small, tiny_bert_tiny
+from .unified_swin import swin_tiny, swin_small, swin_base
+
 
 
 def resnet18(quantization_method="linear", **kwargs):
@@ -67,3 +70,25 @@ def tinygpt_mini(quantization_method="linear", **kwargs):
 
 def tinygpt_small(quantization_method="linear", **kwargs):
     return tiny_gpt_small(quantization_method=quantization_method, **kwargs)
+
+
+def tinybert_base(quantization_method="linear", **kwargs):
+    return tiny_bert_base(quantization_method=quantization_method, **kwargs)
+
+def tinybert_mini(quantization_method="linear", **kwargs):
+    return tiny_bert_mini(quantization_method=quantization_method, **kwargs)
+
+def tinybert_small(quantization_method="linear", **kwargs):
+    return tiny_bert_small(quantization_method=quantization_method, **kwargs)
+
+def tinybert_tiny(quantization_method="linear", **kwargs):
+    return tiny_bert_tiny(quantization_method=quantization_method, **kwargs)
+
+def swin_tiny_model(quantization_method="linear", **kwargs):
+    return swin_tiny(quantization_method=quantization_method, **kwargs)
+
+def swin_small_model(quantization_method="linear", **kwargs):
+    return swin_small(quantization_method=quantization_method, **kwargs)
+
+def swin_base_model(quantization_method="linear", **kwargs):
+    return swin_base(quantization_method=quantization_method, **kwargs)

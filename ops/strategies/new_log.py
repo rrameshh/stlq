@@ -17,6 +17,16 @@ class LogStrategy(QuantizationStrategy):
         5. Calculate residual error
         6. Optionally compute secondary quantization (q2) if error > threshold
         """
+
+        # # REMEMBER TO REMOVE THIS!!!!!
+        # if (weight.dim() == 4 and weight.shape[1] == 1) or \
+        # (weight.dim() == 4 and weight.shape[2] == 1 and weight.shape[3] == 1 and 
+        #     weight.shape[0] < weight.shape[1]):  # 1x1 projection layers
+        #     from .linear import LinearStrategy
+        #     return LinearStrategy(self.config).quantize_weight(weight, per_channel)
+
+        
+
         config = self.config  # Assuming config has threshold, eps, max_value, etc.
         
         if per_channel:
@@ -28,6 +38,7 @@ class LogStrategy(QuantizationStrategy):
 
         weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, rest]
         a = weight_reshaped.abs().max(dim=1).values  # [out_channels]
+
         a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
         a_view = a.view(a.shape[0], *([1] * (weight.dim() - 1)))
         s = torch.sign(weight)
@@ -38,15 +49,12 @@ class LogStrategy(QuantizationStrategy):
         max_value = (2 ** config.bits) - 1
         q1 = torch.zeros_like(weight, dtype=torch.uint8)
 
-
         if torch.any(non_zero_mask):
             normalized = torch.abs(weight[non_zero_mask]) / a_view.expand_as(weight)[non_zero_mask]
+           
             normalized = normalized.float()
-            # print(f"DEBUG Q1 - Normalized range: [{normalized.min().item():.8f}, {normalized.max().item():.8f}]")
             q1_non_zero = -torch.log2(normalized)
-            # print(f"DEBUG Q1 - Raw q1 range: [{q1_non_zero.min().item():.2f}, {q1_non_zero.max().item():.2f}]")
             q1_non_zero = torch.clamp((q1_non_zero.round()), 0, max_value)
-            # print(f"DEBUG Q1 - Clamped q1 range: [{q1_non_zero.min().item()}, {q1_non_zero.max().item()}]")
             q1[non_zero_mask] = q1_non_zero.to(torch.uint8) # check dtype
 
 
@@ -63,14 +71,6 @@ class LogStrategy(QuantizationStrategy):
         err_magnitude = torch.abs(err_normalized)
         second_word_mask = (err_magnitude > config.threshold) & non_zero_mask  # Exclude zeros
 
-        
-        # print(f"Threshold: {config.threshold}")
-        # print(f"Max error magnitude: {err_magnitude.max().item()}")
-        # print(f"Number of errors > threshold: {(err_magnitude > config.threshold).sum().item()}")
-        # print(f"Non-zero mask sum: {non_zero_mask.sum().item()}")
-        # print(f"Second-word mask sum: {second_word_mask.sum().item()}")
-        # print(f"Any second words?: {torch.any(second_word_mask)}")
-
         q2 = None
         s_err = None
 
@@ -85,12 +85,8 @@ class LogStrategy(QuantizationStrategy):
                 print(f"WARNING: Zero or negative error magnitudes found: {(selected_err_mag <= 0).sum().item()}")
                 selected_err_mag = torch.clamp(selected_err_mag, min=1e-8)  # Prevent log(0)
 
-            # print(f"DEBUG Q2 - Selected error mag range: [{selected_err_mag.min().item():.6f}, {selected_err_mag.max().item():.6f}]")
-            # print(f"DEBUG Q2 - Any zeros in selected_err_mag?: {(selected_err_mag == 0).sum().item()}")
-            # print(f"DEBUG Q2 - Any infs in selected_err_mag?: {torch.isinf(selected_err_mag).sum().item()}")
             q2_selected = -torch.log2(selected_err_mag)
-            # print(f"DEBUG Q2 - q2_selected range: [{q2_selected.min().item():.6f}, {q2_selected.max().item():.6f}]")
-            # print(f"DEBUG Q2 - Any infs in q2_selected?: {torch.isinf(q2_selected).sum().item()}")
+        
             q2_selected = torch.clamp((q2_selected.round()), 2, max_value + 2).to(torch.uint8)
             q2[second_word_mask] = q2_selected
             s_err[second_word_mask] = s_err_selected
@@ -98,39 +94,8 @@ class LogStrategy(QuantizationStrategy):
         result =  LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
         result = LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
     
-        # try:
-        #     reconstructed = result.dequantize()
-        #     mse = torch.mean((weight - reconstructed) ** 2).item()
-        #     max_error = torch.max(torch.abs(weight - reconstructed)).item()
-        #     relative_error = (torch.norm(weight - reconstructed) / torch.norm(weight)).item()
-            
-        #     print(f"🔍 RECONSTRUCTION QUALITY:")
-        #     print(f"   Original weight range: [{weight.min().item():.6e}, {weight.max().item():.6e}]")
-        #     print(f"   Reconstructed range: [{reconstructed.min().item():.6e}, {reconstructed.max().item():.6e}]")
-        #     print(f"   MSE: {mse:.6e}")
-        #     print(f"   Max Error: {max_error:.6e}")  
-        #     print(f"   Relative Error: {relative_error:.4f}")
-        #     print(f"   Original norm: {torch.norm(weight).item():.6f}")
-        #     print(f"   Reconstructed norm: {torch.norm(reconstructed).item():.6f}")
-            
-        #     # Check if reconstruction is catastrophically bad
-        #     if relative_error > 0.8:  # More than 80% error
-        #         print(f"🚨 CATASTROPHIC reconstruction quality ({relative_error:.1%}) - falling back to linear")
-        #         from .linear import LinearStrategy
-        #         return LinearStrategy(config).quantize_weight(weight, per_channel=True)
-        #     elif relative_error > 0.3:  # More than 30% error  
-        #         print(f"⚠️  Poor reconstruction quality ({relative_error:.1%})")
-        #     else:
-        #         print(f"✅ Acceptable reconstruction quality ({relative_error:.1%})")
-                
-        # except Exception as e:
-        #     print(f"🚨 Exception during reconstruction check: {e} - falling back to linear")
-        #     from .linear import LinearStrategy
-        #     return LinearStrategy(config).quantize_weight(weight, per_channel=True)
-
         return result
 
-        # return
     
     def _quantize_weight_per_tensor(self, weight: torch.Tensor, config):
 

@@ -337,7 +337,6 @@ class IndustryStandardViT(nn.Module):
             self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         
         self._init_weights()
-        self._print_flow_info()
     
     def _init_weights(self):
         """Initialize weights following ViT paper"""
@@ -353,22 +352,7 @@ class IndustryStandardViT(nn.Module):
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
     
-    def _print_flow_info(self):
-        """Print the explicit flow information"""
-        print("\n" + "="*60)
-        print("EXPLICIT QUANTIZATION FLOW - NO FLEXIBLE HANDLING")
-        print("="*60)
-        print("📍 FLOW TRANSITIONS:")
-        print("   🔵 FP32: Patch embedding, LayerNorm, residuals, activations")
-        print("   🔴 INT8: Linear layer matrix multiplications only")
-        print("   ⚡ TRANSITIONS: Explicit quantize/dequantize at boundaries")
-        print("\n📋 FLOW SEQUENCE:")
-        print("   1. FP32 Patches → FP32 Embeddings")
-        print("   2. FP32 → Quantize → INT8 Linear → Dequantize → FP32")
-        print("   3. FP32 Attention/MLP computation")
-        print("   4. FP32 Residual connections")
-        print("   5. Repeat for each transformer block")
-        print("="*60)
+
     
     def forward_features(self, x):
         """
@@ -377,33 +361,27 @@ class IndustryStandardViT(nn.Module):
         B = x.shape[0]
         
         # ============ FP32 EMBEDDING PHASE ============
-        # print(f"🔵 Input: {type(x)} {x.dtype}")
         
         # Patch embedding (FP32)
         x = self.patch_embed(x)
-        # print(f"🔵 After patch embed: {type(x)} {x.dtype}")
         
         # Add class token and position embeddings (FP32)
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.pos_embed
         x = self.pos_drop(x)
-        # print(f"🔵 After embeddings: {type(x)} {x.dtype}")
         
         # ============ EXPLICIT MIXED PRECISION COMPUTATION ============
         
         # Transformer blocks (explicit transitions)
         for i, blk in enumerate(self.blocks):
             # print(f"\n--- Block {i} ---")
-            # print(f"🔵 Block input: {type(x)} {x.dtype}")
             x = blk(x)  # Handles explicit transitions internally
-            # print(f"🔵 Block output: {type(x)} {x.dtype}")
         
         # ============ FP32 OUTPUT PHASE ============
         
         # Final processing (FP32)
         x = self.norm(x)
-        # print(f"🔵 After final norm: {type(x)} {x.dtype}")
         
         return x
 
@@ -416,21 +394,16 @@ class IndustryStandardViT(nn.Module):
         
         if hasattr(self, 'head_quantizer'):
             # Quantized classifier path
-            # print(f"🔵→🔴 Quantizing for classifier")
             cls_quantized = self.head_quantizer(cls_token)
-            # print(f"🔴 Quantized cls token: {type(cls_quantized)}")
             
             x = self.head(cls_quantized)
-            # print(f"🔴 Quantized head output: {type(x)}")
             
             # Dequantize output
             if isinstance(x, LinearQuantizedTensor):
                 x = x.dequantize()
-                # print(f"🔴→🔵 Dequantized output: {type(x)} {x.dtype}")
         else:
             # FP32 classifier path
             x = self.head(cls_token)
-            # print(f"🔵 FP32 head output: {type(x)} {x.dtype}")
         
         return x
 

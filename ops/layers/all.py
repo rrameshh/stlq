@@ -1,4 +1,4 @@
-# ops/layers/unified.py
+# ops/layers/all.py
 from typing import Optional, Union
 import torch
 import torch.nn.functional as F
@@ -332,6 +332,7 @@ class UnifiedQuantizedAdaptiveAvgPool2d(UnifiedQuantizedOperator):
         else:
             assert isinstance(input, torch.Tensor)
             return F.adaptive_avg_pool2d(input, self.output_size)
+  
 
 
 class UnifiedQuantizedMaxPool2d(UnifiedQuantizedOperator):
@@ -382,4 +383,5 @@ class UnifiedQuantizedFlatten(UnifiedQuantizedOperator):
 
         else:
             assert isinstance(input, torch.Tensor)
+       
             return torch.flatten(input, self.start_dim, self.end_dim)

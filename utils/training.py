@@ -93,17 +93,6 @@ def train_epoch(
 
 
 def validate(model, test_loader, epoch: int, writer: SummaryWriter) -> float:
-    """Debug version to understand what's happening"""
-    # model.eval()
-
-    # if epoch == 1:  # Only debug on first epoch
-    #     from debugger import diagnose_log_quantization_issue
-    #     diagnose_log_quantization_issue(model, test_loader)
-
-    # model.eval()
-    # original_training_states = {}
-    # for name, module in model.named_modules():
-    #     original_training_states[name] = module.training
     
     # Put model in eval mode but keep BatchNorm in train mode
     model.eval()
@@ -125,64 +114,20 @@ def validate(model, test_loader, epoch: int, writer: SummaryWriter) -> float:
                 device = model.config.device
                 
             inputs, targets = inputs.to(device), targets.to(device)
-            
-            # DEBUG: Print input info
-            # if first_batch:
-            #     print(f"\n=== VALIDATION DEBUG ===")
-            #     print(f"Input shape: {inputs.shape}")
-            #     print(f"Input range: [{inputs.min().item():.6f}, {inputs.max().item():.6f}]")
-            #     print(f"Target shape: {targets.shape}")
-            #     print(f"Target unique values: {torch.unique(targets)}")
-            
-            outputs = model(inputs)
-            
-            # DEBUG: Print output info
-            # if first_batch:
-            #     print(f"Raw output type: {type(outputs)}")
-            #     print(f"Raw output shape: {outputs.shape}")
-            #     print(f"Raw output range: [{outputs.min().item():.6f}, {outputs.max().item():.6f}]")
-            #     print(f"Raw output mean: {outputs.mean().item():.6f}")
-            #     print(f"Raw output std: {outputs.std().item():.6f}")
-                
-            #     # Check if outputs look reasonable for classification
-            #     print(f"Max logit value: {outputs.max().item():.6f}")
-            #     print(f"Min logit value: {outputs.min().item():.6f}")
-                
-            #     # Check softmax
-            #     softmax_outputs = torch.softmax(outputs, dim=1)
-            #     print(f"Softmax max: {softmax_outputs.max().item():.6f}")
-            #     print(f"Softmax min: {softmax_outputs.min().item():.6f}")
-            #     print(f"Softmax for first sample: {softmax_outputs[0]}")
-                
-            #     # Check predictions
-            #     _, predicted = outputs.max(1)
-            #     print(f"Predicted classes for first 10 samples: {predicted[:10]}")
-            #     print(f"True classes for first 10 samples: {targets[:10]}")
-                
-            #     first_batch = False
-            
-            # SIMPLIFIED validation logic - just use outputs directly
-            dequant_outputs = outputs  # Since quantization is disabled, this should be torch.Tensor
-            
+            dequant_outputs = model(inputs)
             loss = F.cross_entropy(dequant_outputs, targets)
-            
             test_loss += loss.item()
             _, predicted = dequant_outputs.max(1)
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
-            
-            # Only check first few batches for debugging
-            # if first_batch == False:  # After first batch
-            #     break
-            # get rid of this post debugging
+
     
     accuracy = 100.0 * correct / total
     # avg_loss = test_loss / 1  # Only one batch for debugging
     avg_loss = test_loss/len(test_loader)
     
-    print(f'Debug Validation - Epoch: {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
+    print(f'Validation - Epoch: {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
     print(f"Correct predictions: {correct}/{total}")
-    #     print(f'Validation - Epoch: {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')
         
     # Log to TensorBoard
     writer.add_scalar('Validation/Loss', avg_loss, epoch)
