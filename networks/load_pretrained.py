@@ -1,7 +1,7 @@
 import torch
 import torchvision.models as models
 from networks.unified_resnet import resnet18
-# Add this to networks/load_pretrained.py
+
 
 import timm
 import torch
@@ -762,3 +762,288 @@ def _create_deit_weight_mapping(pretrained_dict, custom_dict, variant):
     
     print(f"🔍 Created {len(weight_mapping)} DeiT weight mappings (including distillation token)")
     return weight_mapping
+
+
+def _debug_actual_swin_structure(model):
+    """Debug what blocks actually exist in the built model"""
+    print("🔍 Actual model structure:")
+    
+    for layer_idx in range(4):
+        layer = getattr(model, 'layers', None)
+        if layer and len(layer) > layer_idx:
+            actual_layer = layer[layer_idx]
+            num_blocks = len(actual_layer.blocks) if hasattr(actual_layer, 'blocks') else 0
+            print(f"  Layer {layer_idx}: {num_blocks} blocks")
+        else:
+            print(f"  Layer {layer_idx}: NOT FOUND")
+    
+    # Also check state dict keys
+    state_dict_blocks = {}
+    for key in model.state_dict().keys():
+        if 'layers.' in key and '.blocks.' in key:
+            parts = key.split('.')
+            if len(parts) >= 4:
+                layer_idx = int(parts[1])
+                block_idx = int(parts[3])
+                if layer_idx not in state_dict_blocks:
+                    state_dict_blocks[layer_idx] = set()
+                state_dict_blocks[layer_idx].add(block_idx)
+    
+    print("🔍 State dict structure:")
+    for layer_idx in sorted(state_dict_blocks.keys()):
+        max_block = max(state_dict_blocks[layer_idx])
+        print(f"  Layer {layer_idx}: Blocks 0-{max_block} ({max_block + 1} total)")
+
+
+def load_pretrained_swin(model, variant="tiny", num_classes=100, img_size=224):
+    """
+    Load pretrained Swin weights from timm into your quantized Swin model
+    """
+    print(f"Loading pretrained Swin-{variant} weights...")
+
+    _debug_actual_swin_structure(model)
+
+    
+    # Map variants to timm model names
+    timm_model_names = {
+        "tiny": "swin_tiny_patch4_window7_224",
+        "small": "swin_small_patch4_window7_224", 
+        "base": "swin_base_patch4_window7_224"
+    }
+    
+    if variant not in timm_model_names:
+        raise ValueError(f"Unknown Swin variant: {variant}. Available: {list(timm_model_names.keys())}")
+    
+    # Load pretrained model from timm
+    timm_model_name = timm_model_names[variant]
+    try:
+        pretrained_model = timm.create_model(timm_model_name, pretrained=True, img_size=img_size)
+        print(f"Successfully loaded {timm_model_name} from timm")
+    except Exception as e:
+        print(f"Failed to load Swin from timm: {e}")
+        print("Falling back to random initialization")
+        return model
+    
+    pretrained_dict = pretrained_model.state_dict()
+    custom_dict = model.state_dict()
+
+    print("🔍 Timm Swin downsample dimensions:")
+    for key, tensor in pretrained_dict.items():
+        if 'downsample.reduction.weight' in key:
+            print(f"  {key}: {tensor.shape}")
+        if 'downsample.norm.weight' in key:
+            print(f"  {key}: {tensor.shape}")
+    
+    
+    # Create weight mapping
+    weight_mapping = _create_swin_weight_mapping(pretrained_dict, custom_dict, variant)
+
+    transferred, skipped, errors = _transfer_swin_weights(
+        pretrained_dict, custom_dict, weight_mapping, num_classes
+    )
+    
+    print(f"Swin weight transfer summary:")
+    print(f"  Transferred: {transferred}")
+    print(f"  Skipped: {skipped}") 
+    print(f"  Errors: {errors}")
+    
+    # Load the updated state dict
+    model.load_state_dict(custom_dict)
+    
+    # Reset quantization parameters
+    _reset_swin_quantization_params(model)
+    
+    return model
+
+
+def _create_swin_weight_mapping(pretrained_dict, custom_dict, variant):
+    weight_mapping = {}
+    
+    # 1. Patch embedding - FIX THE NAMING
+    if 'patch_embed.proj.weight' in pretrained_dict:
+        if 'patch_embed.projection.weight' in custom_dict:
+            weight_mapping.update({
+                'patch_embed.proj.weight': 'patch_embed.projection.weight',
+                'patch_embed.proj.bias': 'patch_embed.projection.bias',
+            })
+        elif 'patch_embed.projection.0.weight' in custom_dict:
+            # Alternative naming structure
+            weight_mapping.update({
+                'patch_embed.proj.weight': 'patch_embed.projection.0.weight',
+                'patch_embed.proj.bias': 'patch_embed.projection.0.bias',
+            })
+    
+    # 2. Use CORRECT Swin-Tiny depths
+    correct_depths = [2, 2, 6, 2]  # Standard Swin-Tiny
+    
+    print(f"🔧 Using correct Swin-Tiny depths: {correct_depths}")
+    
+    # 3. Map each layer with EXACT block counts
+    for layer_idx in range(4):
+        layer_prefix = f'layers.{layer_idx}'
+        num_blocks = correct_depths[layer_idx]  # Use known architecture
+        
+        print(f"🔧 Layer {layer_idx}: Mapping {num_blocks} blocks (not detecting)")
+        
+        for block_idx in range(num_blocks):
+            block_prefix = f'{layer_prefix}.blocks.{block_idx}'
+            
+            # Check if this block actually exists in custom model
+            test_key = f'{block_prefix}.norm1.weight'
+            if test_key not in custom_dict:
+                print(f"⚠️  Skipping {block_prefix} - doesn't exist in custom model")
+                continue
+            
+            # Layer norms (always FP32)
+            weight_mapping.update({
+                f'{block_prefix}.norm1.weight': f'{block_prefix}.norm1.weight',
+                f'{block_prefix}.norm1.bias': f'{block_prefix}.norm1.bias',
+                f'{block_prefix}.norm2.weight': f'{block_prefix}.norm2.weight',
+                f'{block_prefix}.norm2.bias': f'{block_prefix}.norm2.bias',
+            })
+            
+            # FIXED: Check for quantized vs regular attention
+            if f'{block_prefix}.attn.qkv.linear.weight' in custom_dict:
+                # Quantized attention layers
+                weight_mapping.update({
+                    f'{block_prefix}.attn.qkv.weight': f'{block_prefix}.attn.qkv.linear.weight',
+                    f'{block_prefix}.attn.qkv.bias': f'{block_prefix}.attn.qkv.linear.bias',
+                    f'{block_prefix}.attn.proj.weight': f'{block_prefix}.attn.proj.linear.weight',
+                    f'{block_prefix}.attn.proj.bias': f'{block_prefix}.attn.proj.linear.bias',
+                })
+                
+                # Quantized MLP layers
+                weight_mapping.update({
+                    f'{block_prefix}.mlp.fc1.weight': f'{block_prefix}.mlp.fc1.linear.weight',
+                    f'{block_prefix}.mlp.fc1.bias': f'{block_prefix}.mlp.fc1.linear.bias',
+                    f'{block_prefix}.mlp.fc2.weight': f'{block_prefix}.mlp.fc2.linear.weight',
+                    f'{block_prefix}.mlp.fc2.bias': f'{block_prefix}.mlp.fc2.linear.bias',
+                })
+            elif f'{block_prefix}.attn.qkv.weight' in custom_dict:
+                # Regular attention layers
+                weight_mapping.update({
+                    f'{block_prefix}.attn.qkv.weight': f'{block_prefix}.attn.qkv.weight',
+                    f'{block_prefix}.attn.qkv.bias': f'{block_prefix}.attn.qkv.bias',
+                    f'{block_prefix}.attn.proj.weight': f'{block_prefix}.attn.proj.weight',
+                    f'{block_prefix}.attn.proj.bias': f'{block_prefix}.attn.proj.bias',
+                    f'{block_prefix}.mlp.fc1.weight': f'{block_prefix}.mlp.fc1.weight',
+                    f'{block_prefix}.mlp.fc1.bias': f'{block_prefix}.mlp.fc1.bias',
+                    f'{block_prefix}.mlp.fc2.weight': f'{block_prefix}.mlp.fc2.weight',
+                    f'{block_prefix}.mlp.fc2.bias': f'{block_prefix}.mlp.fc2.bias',
+                })
+    
+    # 4. FIXED: Downsample mapping with correct indexing
+    # Timm has downsample layers at indices [1, 2, 3] (no layer 0 downsample)
+    # Your model has downsample layers at indices [0, 1, 2]
+    downsample_mapping = {
+        0: 1,  # Your Layer 0 downsample → timm Layer 1 downsample  
+        1: 2,  # Your Layer 1 downsample → timm Layer 2 downsample
+        2: 3   # Your Layer 2 downsample → timm Layer 3 downsample
+    }
+    
+    for custom_layer_idx in range(3):  # Your layers 0,1,2 have downsample
+        timm_layer_idx = downsample_mapping[custom_layer_idx]
+        
+        custom_prefix = f'layers.{custom_layer_idx}.downsample'
+        timm_prefix = f'layers.{timm_layer_idx}.downsample'
+        
+        # Check if downsample exists in both
+        if f'{timm_prefix}.norm.weight' in pretrained_dict and f'{custom_prefix}.norm.weight' in custom_dict:
+            
+            print(f"🔧 Mapping downsample: Your Layer {custom_layer_idx} ← Timm Layer {timm_layer_idx}")
+            
+            # Norm layer
+            weight_mapping.update({
+                f'{timm_prefix}.norm.weight': f'{custom_prefix}.norm.weight',
+                f'{timm_prefix}.norm.bias': f'{custom_prefix}.norm.bias',
+            })
+            
+            # Reduction layer
+            if f'{custom_prefix}.reduction.linear.weight' in custom_dict:
+                # Quantized reduction
+                weight_mapping.update({
+                    f'{timm_prefix}.reduction.weight': f'{custom_prefix}.reduction.linear.weight',
+                    f'{timm_prefix}.reduction.bias': f'{custom_prefix}.reduction.linear.bias',
+                })
+            elif f'{custom_prefix}.reduction.weight' in custom_dict:
+                # Regular reduction
+                weight_mapping.update({
+                    f'{timm_prefix}.reduction.weight': f'{custom_prefix}.reduction.weight',
+                    f'{timm_prefix}.reduction.bias': f'{custom_prefix}.reduction.bias',
+                })
+        else:
+            print(f"⚠️  Skipping downsample mapping for layer {custom_layer_idx} - keys not found")
+    
+    # 5. Final norm
+    weight_mapping.update({
+        'norm.weight': 'norm.weight',
+        'norm.bias': 'norm.bias',
+    })
+    
+    # 6. Classification head
+    if 'head.weight' in pretrained_dict:
+        if 'head.linear.weight' in custom_dict:
+            weight_mapping.update({
+                'head.weight': 'head.linear.weight',
+                'head.bias': 'head.linear.bias',
+            })
+        elif 'head.weight' in custom_dict:
+            weight_mapping.update({
+                'head.weight': 'head.weight',
+                'head.bias': 'head.bias',
+            })
+    
+    print(f"🔍 Created {len(weight_mapping)} Swin weight mappings")
+    return weight_mapping
+
+
+def _transfer_swin_weights(pretrained_dict, custom_dict, weight_mapping, num_classes):
+    """Transfer Swin weights (reuses your existing logic)"""
+    transferred = 0
+    skipped = 0
+    errors = 0
+    
+    for pretrained_key, custom_key in weight_mapping.items():
+        if pretrained_key in pretrained_dict and custom_key in custom_dict:
+            try:
+                pretrained_param = pretrained_dict[pretrained_key]
+                custom_param = custom_dict[custom_key]
+                
+                if pretrained_param.shape == custom_param.shape:
+                    custom_dict[custom_key].copy_(pretrained_param)
+                    transferred += 1
+                elif 'head' in custom_key and num_classes != 1000:
+                    # Skip classifier if different number of classes
+                    print(f"Skipping classifier layer due to class mismatch: {pretrained_param.shape} vs {custom_param.shape}")
+                    skipped += 1
+                else:
+                    print(f"Shape mismatch {pretrained_key}: {pretrained_param.shape} vs {custom_key}: {custom_param.shape}")
+                    errors += 1
+                    
+            except Exception as e:
+                print(f"Error transferring {pretrained_key} -> {custom_key}: {e}")
+                errors += 1
+        else:
+            missing_key = pretrained_key if pretrained_key not in pretrained_dict else custom_key
+            print(f"Missing key during transfer: {missing_key}")
+            skipped += 1
+    
+    return transferred, skipped, errors
+
+
+def _reset_swin_quantization_params(model):
+    """Reset quantization parameters for Swin (reuses your existing logic)"""
+    print("Resetting quantization parameters for Swin...")
+    
+    for name, module in model.named_modules():
+        # Reset quantization statistics
+        if hasattr(module, 'num_batches_tracked'):
+            module.num_batches_tracked.data.fill_(0)
+        if hasattr(module, 'running_min'):
+            module.running_min.data.fill_(0.0)
+        if hasattr(module, 'running_max'):
+            module.running_max.data.fill_(0.0)
+            
+        # Reset any other quantization-specific buffers
+        if hasattr(module, 'reset_stats'):
+            module.reset_stats()

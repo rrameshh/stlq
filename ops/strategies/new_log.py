@@ -1,7 +1,6 @@
 #ops/strategies/new_log.py
 from .base import QuantizationStrategy
-from ..tensors.log import LogQuantizedTensor
-# from ..tensors.new_log import LogQuantizedTensor
+from ..tensors.new_log import LogQuantizedTensor
 import torch
 from ..quant_config import QuantizationConfig
 import numpy as np

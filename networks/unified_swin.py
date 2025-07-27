@@ -364,80 +364,177 @@ class BasicLayer(nn.Module):
 class SwinTransformer(nn.Module):
     """FIXED: Swin Transformer with proper initialization and dimension tracking"""
     
-    def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=1000,
-                 embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
-                 window_size=7, mlp_ratio=4., qkv_bias=True, drop_rate=0., 
-                 attn_drop_rate=0., drop_path_rate=0.1, config=None):
-        super().__init__()
+    # def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=1000,
+    #              embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
+    #              window_size=7, mlp_ratio=4., qkv_bias=True, drop_rate=0., 
+    #              attn_drop_rate=0., drop_path_rate=0.1, config=None):
+    #     super().__init__()
+
+    #     print(f"🔍 Swin Init Debug:")
+    #     print(f"  img_size: {img_size}")
+    #     print(f"  patch_size: {patch_size}")
+    
         
-        self.num_classes = num_classes
-        self.num_layers = len(depths)
-        self.embed_dim = embed_dim
-        self.mlp_ratio = mlp_ratio
-        self.window_size = window_size
-        self.img_size = img_size
-        self.patch_size = patch_size
+    #     self.num_classes = num_classes
+    #     self.num_layers = len(depths)
+    #     self.embed_dim = embed_dim
+    #     self.mlp_ratio = mlp_ratio
+    #     self.window_size = window_size
+    #     self.img_size = img_size
+    #     self.patch_size = patch_size
         
-        # CRITICAL FIX: Calculate actual patch resolution
-        self.patches_resolution = [img_size // patch_size, img_size // patch_size]
+    #     # CRITICAL FIX: Calculate actual patch resolution
+    #     self.patches_resolution = [img_size // patch_size, img_size // patch_size]
+    #     print(f"  calculated patches_resolution: {self.patches_resolution}")
         
-        # Auto-adjust window size for small images
-        if window_size > min(self.patches_resolution):
-            window_size = min(self.patches_resolution)
-            self.window_size = window_size
-            print(f"🔧 Swin Init: img_size={img_size}, patch_size={patch_size}, patches_resolution={self.patches_resolution}, window_size={window_size}")
+    #     # Auto-adjust window size for small images
+    #     if window_size > min(self.patches_resolution):
+    #         window_size = min(self.patches_resolution)
+    #         self.window_size = window_size
+    #         print(f"🔧 Swin Init: img_size={img_size}, patch_size={patch_size}, patches_resolution={self.patches_resolution}, window_size={window_size}")
         
-        # Patch embedding
-        self.patch_embed = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        self.pos_drop = nn.Dropout(p=drop_rate)
+    #     # Patch embedding
+    #     self.patch_embed = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+    #     self.pos_drop = nn.Dropout(p=drop_rate)
         
-        # Build layers with CORRECT resolution tracking
-        self.layers = nn.ModuleList()
-        current_resolution = self.patches_resolution.copy()  # Start with actual patch resolution
+    #     # Build layers with CORRECT resolution tracking
+    #     self.layers = nn.ModuleList()
+    #     current_resolution = self.patches_resolution.copy()  # Start with actual patch resolution
         
-        for i_layer in range(self.num_layers):
-            layer_dim = int(embed_dim * 2 ** i_layer)
+    #     for i_layer in range(self.num_layers):
+    #         layer_dim = int(embed_dim * 2 ** i_layer)
             
-            # Adjust window size for each layer based on its resolution
-            layer_window_size = min(window_size, min(current_resolution))
-            print(f"🔍 Layer {i_layer}: resolution={current_resolution}, window_size={layer_window_size}")
+    #         # Adjust window size for each layer based on its resolution
+    #         layer_window_size = min(window_size, min(current_resolution))
+    #         print(f"🔍 Layer {i_layer}: resolution={current_resolution}, window_size={layer_window_size}")
             
-            # ADDITIONAL FIX: For CIFAR-10, be more conservative with window sizes
-            if max(current_resolution) <= 8:  # Small resolutions like CIFAR-10
-                layer_window_size = min(layer_window_size, 4)  # Cap at 4 for small images
-                print(f"🔧 Small image detected, capped window_size to {layer_window_size}")
+    #         # ADDITIONAL FIX: For CIFAR-10, be more conservative with window sizes
+    #         if max(current_resolution) <= 8:  # Small resolutions like CIFAR-10
+    #             layer_window_size = min(layer_window_size, 4)  # Cap at 4 for small images
+    #             print(f"🔧 Small image detected, capped window_size to {layer_window_size}")
             
-            layer = BasicLayer(
-                dim=layer_dim,
-                input_resolution=current_resolution.copy(),  # Use current resolution
-                depth=depths[i_layer],
-                num_heads=num_heads[i_layer],
-                window_size=layer_window_size,  # Use adjusted window size for this layer
-                mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias,
-                drop=drop_rate,
-                downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
-                config=config
-            )
-            self.layers.append(layer)
+    #         layer = BasicLayer(
+    #             dim=layer_dim,
+    #             input_resolution=current_resolution.copy(),  # Use current resolution
+    #             depth=depths[i_layer],
+    #             num_heads=num_heads[i_layer],
+    #             window_size=layer_window_size,  # Use adjusted window size for this layer
+    #             mlp_ratio=mlp_ratio,
+    #             qkv_bias=qkv_bias,
+    #             drop=drop_rate,
+    #             downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
+    #             config=config
+    #         )
+    #         self.layers.append(layer)
             
-            # Update resolution for next layer (after potential downsampling)
-            if i_layer < self.num_layers - 1:  # Has downsampling
-                # current_resolution = [current_resolution[0] // 2, current_resolution[1] // 2]
-                current_resolution = layer.output_resolution.copy()
+    #         # Update resolution for next layer (after potential downsampling)
+    #         if i_layer < self.num_layers - 1:  # Has downsampling
+    #             # current_resolution = [current_resolution[0] // 2, current_resolution[1] // 2]
+    #             current_resolution = layer.output_resolution.copy()
+
 
         
-        self.norm = nn.LayerNorm(int(embed_dim * 2 ** (self.num_layers - 1)))
+    #     self.norm = nn.LayerNorm(int(embed_dim * 2 ** (self.num_layers - 1)))
         
-        # Classification head
-        final_dim = int(embed_dim * 2 ** (self.num_layers - 1))
-        quantize_classifier = getattr(config, 'quantize_classifier', False)
-        if quantize_classifier:
-            self.head = UnifiedQuantizedLinear(final_dim, num_classes, config=config)
-            self.head_quantizer = UnifiedQuantize(config=config)
-        else:
-            self.head = nn.Linear(final_dim, num_classes) if num_classes > 0 else nn.Identity()
-    
+    #     # Classification head
+    #     final_dim = int(embed_dim * 2 ** (self.num_layers - 1))
+    #     quantize_classifier = getattr(config, 'quantize_classifier', False)
+    #     if quantize_classifier:
+    #         self.head = UnifiedQuantizedLinear(final_dim, num_classes, config=config)
+    #         self.head_quantizer = UnifiedQuantize(config=config)
+    #     else:
+    #         self.head = nn.Linear(final_dim, num_classes) if num_classes > 0 else nn.Identity()
+
+    def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=1000,
+                    embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
+                    window_size=7, mlp_ratio=4., qkv_bias=True, drop_rate=0., 
+                    attn_drop_rate=0., drop_path_rate=0.1, config=None):
+            super().__init__()
+
+            print(f"🔍 Swin Init Debug:")
+            print(f"  img_size: {img_size}")
+            print(f"  patch_size: {patch_size}")
+        
+            self.num_classes = num_classes
+            self.num_layers = len(depths)
+            self.embed_dim = embed_dim
+            self.mlp_ratio = mlp_ratio
+            self.window_size = window_size
+            self.img_size = img_size
+            self.patch_size = patch_size
+            
+            # CRITICAL FIX: Calculate actual patch resolution
+            self.patches_resolution = [img_size // patch_size, img_size // patch_size]
+            print(f"  calculated patches_resolution: {self.patches_resolution}")
+            
+            # Auto-adjust window size for small images
+            if window_size > min(self.patches_resolution):
+                window_size = min(self.patches_resolution)
+                self.window_size = window_size
+                print(f"🔧 Swin Init: img_size={img_size}, patch_size={patch_size}, patches_resolution={self.patches_resolution}, window_size={window_size}")
+            
+            # Patch embedding
+            self.patch_embed = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+            self.pos_drop = nn.Dropout(p=drop_rate)
+            
+            # Build layers with CORRECT resolution tracking
+            self.layers = nn.ModuleList()
+            current_resolution = self.patches_resolution.copy()  # Start with actual patch resolution
+            
+            for i_layer in range(self.num_layers):
+                layer_dim = int(embed_dim * 2 ** i_layer)
+                
+                # Adjust window size for each layer based on its resolution
+                layer_window_size = min(window_size, min(current_resolution))
+                print(f"🔍 Layer {i_layer}: resolution={current_resolution}, window_size={layer_window_size}")
+                
+                # ADDITIONAL FIX: For CIFAR-10, be more conservative with window sizes
+                if max(current_resolution) <= 8:  # Small resolutions like CIFAR-10
+                    layer_window_size = min(layer_window_size, 4)  # Cap at 4 for small images
+                    print(f"🔧 Small image detected, capped window_size to {layer_window_size}")
+                
+                layer = BasicLayer(
+                    dim=layer_dim,
+                    input_resolution=current_resolution.copy(),  # Use current resolution
+                    depth=depths[i_layer],
+                    num_heads=num_heads[i_layer],
+                    window_size=layer_window_size,  # Use adjusted window size for this layer
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
+                    drop=drop_rate,
+                    downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
+                    config=config
+                )
+                self.layers.append(layer)
+                
+                # Update resolution for next layer (after potential downsampling)
+                if i_layer < self.num_layers - 1:  # Has downsampling
+                    current_resolution = layer.output_resolution.copy()
+
+            # 🔧 ADD THIS DEBUG CODE HERE - after all layers are created:
+            print("🔍 Layer dimensions:")
+            for i, layer in enumerate(self.layers):
+                layer_dim = int(embed_dim * 2 ** i)
+                print(f"  Layer {i}: dim={layer_dim}")
+                
+                if hasattr(layer, 'downsample') and layer.downsample:
+                    if hasattr(layer.downsample, 'reduction'):
+                        if hasattr(layer.downsample.reduction, 'linear'):
+                            print(f"    Downsample: {layer.downsample.reduction.linear.in_features} → {layer.downsample.reduction.linear.out_features}")
+                        else:
+                            print(f"    Downsample: {layer.downsample.reduction.in_features} → {layer.downsample.reduction.out_features}")
+            
+            self.norm = nn.LayerNorm(int(embed_dim * 2 ** (self.num_layers - 1)))
+            
+            # Classification head
+            final_dim = int(embed_dim * 2 ** (self.num_layers - 1))
+            quantize_classifier = getattr(config, 'quantize_classifier', False)
+            if quantize_classifier:
+                self.head = UnifiedQuantizedLinear(final_dim, num_classes, config=config)
+                self.head_quantizer = UnifiedQuantize(config=config)
+            else:
+                self.head = nn.Linear(final_dim, num_classes) if num_classes > 0 else nn.Identity()
+        
     def forward(self, x):
         # Patch embedding
         x = self.patch_embed(x)  # [B, C, H, W]
@@ -467,8 +564,63 @@ class SwinTransformer(nn.Module):
 
 
 # FIXED: Factory functions with proper img_size handling
+# def create_swin_transformer(variant="tiny", quantization_method="linear", **kwargs):
+#     """Create Swin Transformer variants with FIXED configurations"""
+    
+#     configs = {
+#         "tiny": {
+#             "embed_dim": 96, 
+#             "depths": [2, 2, 6, 2], 
+#             "num_heads": [3, 6, 12, 24],
+#             "window_size": 7
+#         },
+#         "small": {
+#             "embed_dim": 96, 
+#             "depths": [2, 2, 18, 2], 
+#             "num_heads": [3, 6, 12, 24],
+#             "window_size": 7
+#         },
+#         "base": {
+#             "embed_dim": 128, 
+#             "depths": [2, 2, 18, 2], 
+#             "num_heads": [4, 8, 16, 32],
+#             "window_size": 7
+#         },
+#     }
+    
+#     if variant not in configs:
+#         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
+    
+#     # SAME PATTERN AS YOUR VIT CONFIG CREATION
+#     device = kwargs.pop('device', 'cuda:0')
+#     threshold = kwargs.pop('threshold', 1e-5)
+#     momentum = kwargs.pop('momentum', 0.1)
+#     bits = kwargs.pop('bits', 8)
+#     quantize_classifier = kwargs.pop('quantize_classifier', False)
+    
+#     # CRITICAL FIX: Handle img_size properly - use what's passed in kwargs
+#     img_size = kwargs.get('img_size', 224)  # Default to 224, but use what's passed
+#     print(f"🔧 Swin factory: img_size={img_size} from kwargs={kwargs.get('img_size')}")
+    
+#     from ops.quant_config import QuantizationConfig
+#     config = QuantizationConfig(
+#         method=quantization_method,
+#         momentum=momentum,
+#         device=device,
+#         threshold=threshold,
+#         bits=bits
+#     )
+#     config.quantize_classifier = quantize_classifier
+    
+#     # Merge configs
+#     model_config = configs[variant]
+#     model_config.update(kwargs)  # This should include img_size from _get_model_kwargs
+    
+#     return SwinTransformer(config=config, **model_config)
+    
+
 def create_swin_transformer(variant="tiny", quantization_method="linear", **kwargs):
-    """Create Swin Transformer variants with FIXED configurations"""
+    """Create Swin Transformer variants with PROTECTED configurations"""
     
     configs = {
         "tiny": {
@@ -494,15 +646,15 @@ def create_swin_transformer(variant="tiny", quantization_method="linear", **kwar
     if variant not in configs:
         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
     
-    # SAME PATTERN AS YOUR VIT CONFIG CREATION
+    # Extract config parameters
     device = kwargs.pop('device', 'cuda:0')
     threshold = kwargs.pop('threshold', 1e-5)
     momentum = kwargs.pop('momentum', 0.1)
     bits = kwargs.pop('bits', 8)
     quantize_classifier = kwargs.pop('quantize_classifier', False)
     
-    # CRITICAL FIX: Handle img_size properly - use what's passed in kwargs
-    img_size = kwargs.get('img_size', 224)  # Default to 224, but use what's passed
+    # Handle img_size properly
+    img_size = kwargs.get('img_size', 224)
     print(f"🔧 Swin factory: img_size={img_size} from kwargs={kwargs.get('img_size')}")
     
     from ops.quant_config import QuantizationConfig
@@ -515,9 +667,25 @@ def create_swin_transformer(variant="tiny", quantization_method="linear", **kwar
     )
     config.quantize_classifier = quantize_classifier
     
-    # Merge configs
-    model_config = configs[variant]
-    model_config.update(kwargs)  # This should include img_size from _get_model_kwargs
+    # FIXED: Protect the core architecture from being overridden
+    model_config = configs[variant].copy()  # Make a copy first
+    
+    # Only allow safe parameters to be overridden
+    safe_kwargs = {
+        'img_size': kwargs.get('img_size', 224),
+        'patch_size': kwargs.get('patch_size', 4),
+        'in_chans': kwargs.get('in_chans', 3),
+        'num_classes': kwargs.get('num_classes', 1000),
+        'drop_rate': kwargs.get('drop_rate', 0.0),
+        'attn_drop_rate': kwargs.get('attn_drop_rate', 0.0),
+        'mlp_ratio': kwargs.get('mlp_ratio', 4.0),
+        'qkv_bias': kwargs.get('qkv_bias', True)
+    }
+    
+    # Update with only safe parameters
+    model_config.update(safe_kwargs)
+    
+    print(f"🔧 Final Swin config: depths={model_config['depths']}, num_heads={model_config['num_heads']}")
     
     return SwinTransformer(config=config, **model_config)
 

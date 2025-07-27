@@ -293,14 +293,22 @@ class UniversalQATTrainer:
             })
             
             # Model-specific parameters for vision models
-            if self.args.model_type in ['vit', 'deit', 'swin']:
-                kwargs.update({
-                    'img_size': self.img_size,
-                    'patch_size': 4 if self.img_size == 32 else 16,
-                    'drop_rate': self.args.dropout,
-                    'attn_drop_rate': self.args.attn_dropout,
-                    'quantize_classifier': self.args.quantize_classifier
-                })
+        if self.args.model_type in ['vit', 'deit', 'swin']:
+            # Different patch sizes for different architectures
+            if self.args.model_type == 'swin':
+                patch_size = 4  # Swin always uses patch_size=4
+            else:
+                patch_size = 4 if self.img_size == 32 else 16  # ViT/DeiT use 16 for ImageNet
+            
+            kwargs.update({
+                'img_size': self.img_size,
+                'patch_size': patch_size,
+                'drop_rate': self.args.dropout,
+                'attn_drop_rate': self.args.attn_dropout,
+                'quantize_classifier': self.args.quantize_classifier
+            })
+            
+            print(f"🔧 Set patch_size={patch_size} for {self.args.model_type}")
                 
             if self.args.model_type == 'deit':
                 kwargs.update({
@@ -339,7 +347,13 @@ class UniversalQATTrainer:
                 self.model = load_pretrained_deit(
                     self.model, variant=self.args.model_variant, num_classes=self.num_classes, img_size=self.img_size
                 )
-                
+
+            elif self.args.model_type == 'swin':
+                from networks.load_pretrained import load_pretrained_swin
+                self.model = load_pretrained_swin(
+                    self.model, variant=self.args.model_variant, num_classes=self.num_classes, img_size=self.img_size
+                )
+                            
             print(f" Loaded pretrained {self.args.model_type}-{self.args.model_variant} weights")
             
         except Exception as e:
@@ -623,11 +637,16 @@ class UniversalQATTrainer:
                     loss_dict = self.criterion(outputs, targets)
                     loss = loss_dict['total_loss']
                     logits = outputs[0]  # Use classification head for metrics
+                    
                 else:
                     # Standard training
                     outputs = self.model(inputs)
+                    if isinstance(outputs, tuple):
+                        logits = outputs[0]  # Use classification head
+                    else:
+                        logits = outputs
                     loss = self.criterion(outputs, targets)
-                    logits = outputs
+            
                     
                 # Backward pass
                 loss.backward()
@@ -821,7 +840,7 @@ def main():
     best_metric = trainer.train()
     
     metric_name = "perplexity" if trainer.is_language_model else "accuracy"
-    print(f"🎯 Final result: {best_metric:.2f} {metric_name}")
+    print(f"Final result: {best_metric:.2f} {metric_name}")
 
 
 if __name__ == "__main__":
