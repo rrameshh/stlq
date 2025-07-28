@@ -5,7 +5,8 @@ import requests
 import numpy as np
 from typing import List, Tuple
 from pathlib import Path
-
+import math
+import torch.nn.functional as F
 
 class CharLevelDataset(Dataset):
     """Character-level dataset for language modeling"""
@@ -133,6 +134,8 @@ def get_shakespeare_dataloaders(batch_size=32, seq_len=128, val_split=0.1,
         val_dataset.idx_to_word = train_dataset.idx_to_word
         val_dataset.vocab_size = train_dataset.vocab_size
         vocab_size = train_dataset.vocab_size
+
+    print(f"vocab size in text datasets {vocab_size}")
     
     # Create data loaders
     train_loader = DataLoader(
@@ -316,8 +319,27 @@ def generate_text(model, dataset, device, prompt="", max_length=100, temperature
     return text
 
 
+# def compute_perplexity(model, data_loader, device):
+#     """Compute perplexity on validation set"""
+#     model.eval()
+#     total_loss = 0
+#     total_tokens = 0
+    
+#     with torch.no_grad():
+#         for inputs, targets in data_loader:
+#             inputs, targets = inputs.to(device), targets.to(device)
+            
+#             logits, loss = model(inputs, targets)
+            
+#             total_loss += loss.item() * targets.numel()
+#             total_tokens += targets.numel()
+    
+#     avg_loss = total_loss / total_tokens
+#     perplexity = torch.exp(torch.tensor(avg_loss))
+    
+#     return perplexity.item()
+
 def compute_perplexity(model, data_loader, device):
-    """Compute perplexity on validation set"""
     model.eval()
     total_loss = 0
     total_tokens = 0
@@ -326,12 +348,23 @@ def compute_perplexity(model, data_loader, device):
         for inputs, targets in data_loader:
             inputs, targets = inputs.to(device), targets.to(device)
             
-            logits, loss = model(inputs, targets)
+            # Get raw logits, compute loss manually
+            logits = model(inputs)  # Don't pass targets
             
-            total_loss += loss.item() * targets.numel()
-            total_tokens += targets.numel()
+            # Shift for next-token prediction
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_targets = targets[..., 1:].contiguous()
+            
+            # Compute per-token loss
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)), 
+                shift_targets.view(-1), 
+                reduction='sum'  # Sum, don't average
+            )
+            
+            total_loss += loss.item()
+            total_tokens += shift_targets.numel()
     
     avg_loss = total_loss / total_tokens
-    perplexity = torch.exp(torch.tensor(avg_loss))
-    
-    return perplexity.item()
+    return math.exp(avg_loss)
+

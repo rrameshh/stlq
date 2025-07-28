@@ -268,6 +268,7 @@ class UniversalQATTrainer:
             'threshold': self.args.threshold,
             'bits': self.args.bits,
         }
+
         
         if self.args.model_type == 'tinygpt':
             # TinyGPT-specific parameters
@@ -277,6 +278,8 @@ class UniversalQATTrainer:
                 'dropout': self.args.dropout,
                 'quantize_classifier': self.args.quantize_classifier
             })
+            print(f"vocab size in main model kwards {self.vocab_size}")
+
         elif self.args.model_type == 'tinybert':
             # TinyBERT-specific parameters  
             kwargs.update({

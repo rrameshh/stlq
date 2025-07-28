@@ -206,6 +206,8 @@ class TinyGPT(nn.Module):
         self.vocab_size = vocab_size
         self.max_seq_len = max_seq_len
         self.dim = dim
+
+        print(f"🔍 TinyGPT DEBUG: Creating model with vocab_size={vocab_size}")
         
         # ============ FP32 EMBEDDINGS (like ViT patch embedding) ============
         self.token_embedding = nn.Embedding(vocab_size, dim)
