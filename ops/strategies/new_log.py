@@ -6,7 +6,10 @@ from ..quant_config import QuantizationConfig
 import numpy as np
 
 class LogStrategy(QuantizationStrategy):
-    
+
+    def __init__(self, config):
+        super().__init__(config)
+       
     def quantize_weight(self, weight: torch.Tensor, per_channel: bool = True):
         """
         1. Calculate per-channel or per-tensor max absolute values (a)
@@ -17,12 +20,7 @@ class LogStrategy(QuantizationStrategy):
         6. Optionally compute secondary quantization (q2) if error > threshold
         """
 
-        # # REMEMBER TO REMOVE THIS!!!!!
-        # if (weight.dim() == 4 and weight.shape[1] == 1) or \
-        # (weight.dim() == 4 and weight.shape[2] == 1 and weight.shape[3] == 1 and 
-        #     weight.shape[0] < weight.shape[1]):  # 1x1 projection layers
-        #     from .linear import LinearStrategy
-        #     return LinearStrategy(self.config).quantize_weight(weight, per_channel)
+
 
         
 

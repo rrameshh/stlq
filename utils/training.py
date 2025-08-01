@@ -162,11 +162,11 @@ def save_checkpoint(
         'epoch': epoch,
     }
     
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
+    # Path(save_dir).mkdir(parents=True, exist_ok=True)
     
-    # Save regular checkpoint
-    checkpoint_path = f'{save_dir}/checkpoint_epoch{epoch+1}.pth'
-    torch.save(state, checkpoint_path)
+    # # Save regular checkpoint
+    # checkpoint_path = f'{save_dir}/checkpoint_epoch{epoch+1}.pth'
+    # torch.save(state, checkpoint_path)
     
     # Save best model separately
     if is_best:

@@ -467,15 +467,156 @@ class UniversalQATTrainer:
     def setup_logging(self):
         """Setup TensorBoard logging"""
         self.writer = SummaryWriter(self.args.work_dir)
-        
-    def train(self):
-        """Main training loop"""
-        model_desc = f"{self.args.model_type}-{self.args.model_variant}"
-        # if self.is_language_model:
-        #     dataset_desc = f"{self.args.text_dataset} ({'char' if self.args.char_level else 'word'}-level)"
-        # else:
-        #     dataset_desc = f"{self.args.dataset} ({self.num_classes} classes)"
 
+
+
+    def quick_second_word_check(model, threshold=100):
+        """Quick second word check on a trained model"""
+        total_weights = 0
+        second_words = 0
+        
+        for name, module in model.named_modules():
+            if hasattr(module, 'conv2d'):
+                weight = module.conv2d.weight.data
+            elif hasattr(module, 'linear'):
+                weight = module.linear.weight.data
+            else:
+                continue
+                
+            # Simple second word detection
+            abs_weight = weight.abs()
+            max_vals = abs_weight.view(weight.shape[0], -1).max(dim=1)[0]
+            normalized = abs_weight / max_vals.view(-1, 1, 1, 1)
+            
+            # Simulate quantization error > threshold
+            error_mask = normalized > (threshold / 100)  # rough approximation
+            
+            total_weights += weight.numel()
+            second_words += error_mask.sum().item()
+        
+        ratio = (second_words / total_weights) * 100
+        print(f"Estimated second word ratio: {ratio:.2f}%")
+        return ratio
+
+        
+    # Add this as a standalone function (not inside a class method)
+    def compute_second_word_ratio(model):
+        """
+        Compute the actual second word ratio from log quantized weights
+        """
+        total_weights = 0
+        second_words = 0
+        
+        for name, module in model.named_modules():
+            # Check if this module has quantized weights
+            if hasattr(module, 'strategy') and hasattr(module.strategy, 'config'):
+                if module.strategy.config.method == 'log':
+                    # Get the actual quantized weight
+                    if hasattr(module, 'conv2d'):
+                        weight = module.conv2d.weight.data
+                    elif hasattr(module, 'linear'):
+                        weight = module.linear.weight.data
+                    else:
+                        continue
+                    
+                    # Quantize the weight to get the actual quantized tensor
+                    try:
+                        quantized_weight = module._quantize_weight(weight)
+                        
+                        # Check if it's a LogQuantizedTensor with second words
+                        if hasattr(quantized_weight, 'second_word_mask') and quantized_weight.second_word_mask is not None:
+                            total_weights += weight.numel()
+                            second_words += quantized_weight.second_word_mask.sum().item()
+                        
+                    except Exception as e:
+                        print(f"Could not quantize weight for {name}: {e}")
+                        continue
+        
+        if total_weights == 0:
+            return 0.0
+        
+        ratio = (second_words / total_weights) * 100
+        return ratio
+
+
+    def compute_second_word_ratio_simple(model, threshold=None):
+        """
+        Simplified version that estimates second word usage based on quantization error
+        """
+        if threshold is None:
+            # Get threshold from model config if available
+            for module in model.modules():
+                if hasattr(module, 'config'):
+                    threshold = getattr(module.config, 'threshold', 1e-5)
+                    break
+            else:
+                threshold = 1e-5
+        
+        total_weights = 0
+        second_words = 0
+        
+        for name, module in model.named_modules():
+            # Check if this is a quantized layer
+            if hasattr(module, 'strategy') and hasattr(module, '_quantize_weight'):
+                if hasattr(module, 'conv2d'):
+                    weight = module.conv2d.weight.data
+                elif hasattr(module, 'linear'):
+                    weight = module.linear.weight.data
+                else:
+                    continue
+                
+                try:
+                    # Simulate log quantization to estimate second words
+                    if hasattr(module.strategy, 'config') and module.strategy.config.method == 'log':
+                        # Get per-channel max values
+                        weight_reshaped = weight.reshape(weight.shape[0], -1)
+                        a = weight_reshaped.abs().max(dim=1).values
+                        a = torch.maximum(a, torch.tensor(1e-8, device=weight.device))
+                        a_view = a.view(a.shape[0], *([1] * (weight.dim() - 1)))
+                        
+                        # Normalize weights
+                        normalized_weight = (weight / a_view).float()
+                        
+                        # Simulate primary quantization
+                        zero_mask = (weight == 0.0)
+                        non_zero_mask = ~zero_mask
+                        
+                        reconstructed_normalized = torch.zeros_like(normalized_weight)
+                        if torch.any(non_zero_mask):
+                            q1 = torch.zeros_like(weight, dtype=torch.uint8)
+                            normalized = torch.abs(weight[non_zero_mask]) / a_view.expand_as(weight)[non_zero_mask]
+                            q1_non_zero = -torch.log2(normalized.clamp(min=1e-8))
+                            q1_non_zero = torch.clamp(q1_non_zero.round(), 0, 255)
+                            q1[non_zero_mask] = q1_non_zero.to(torch.uint8)
+                            
+                            reconstructed_normalized[non_zero_mask] = torch.pow(2.0, -q1[non_zero_mask].float())
+                        
+                        # Calculate error
+                        err_normalized = normalized_weight - reconstructed_normalized
+                        err_magnitude = torch.abs(err_normalized)
+                        
+                        # Count weights that need second words (error > threshold)
+                        second_word_mask = (err_magnitude > threshold) & non_zero_mask
+                        
+                        total_weights += weight.numel()
+                        second_words += second_word_mask.sum().item()
+                        
+                except Exception as e:
+                    print(f"Could not process {name}: {e}")
+                    continue
+        
+        if total_weights == 0:
+            return 0.0
+        
+        ratio = (second_words / total_weights) * 100
+        return ratio
+
+
+    # Modified train method - add this to your UniversalQATTrainer class
+    def train(self):
+        """Main training loop with proper second word ratio tracking"""
+        model_desc = f"{self.args.model_type}-{self.args.model_variant}"
+        
         if self.is_language_model:
             dataset_desc = f"{self.args.text_dataset} ({'char' if self.args.char_level else 'word'}-level)"
         elif self.args.model_type == 'tinybert':
@@ -483,7 +624,6 @@ class UniversalQATTrainer:
         else:
             dataset_desc = f"{self.args.dataset} ({self.num_classes} classes)"
 
-            
         print(f" Starting training: {model_desc}")
         print(f" Dataset: {dataset_desc}")
         print(f" Quantization: {self.args.quantization}")
@@ -541,7 +681,7 @@ class UniversalQATTrainer:
             else:
                 epochs_without_improvement += 1
                 
-            # Save checkpoint
+            # Save checkpoint (uncommented)
             save_checkpoint(self.model, self.optimizer, val_metric, epoch, self.args.work_dir, is_best=is_best)
             
             # Early stopping
@@ -559,6 +699,22 @@ class UniversalQATTrainer:
             # Generate sample text for language models
             if self.is_language_model and epoch % 5 == 0:
                 self._generate_sample_text(epoch)
+
+            # CORRECTED: Second word ratio computation
+            if self.args.quantization == 'log':
+                try:
+                    # Try the accurate method first
+                    ratio = compute_second_word_ratio(self.model)
+                    if ratio == 0.0:  # Fallback to estimation
+                        ratio = compute_second_word_ratio_simple(self.model, threshold=self.args.threshold)
+                    
+                    print(f"Second word usage: {ratio:.2f}%")
+                    
+                    # Log to tensorboard
+                    self.writer.add_scalar('SecondWord/Usage', ratio, epoch)
+                    
+                except Exception as e:
+                    print(f"Could not compute second word ratio: {e}")
         
         metric_name = "perplexity" if self.is_language_model else "accuracy"
         print(f"\n Training completed! Best {metric_name}: {best_metric:.2f}")
@@ -573,6 +729,8 @@ class UniversalQATTrainer:
         self.writer.close()
         
         return best_metric
+    
+    
     
     def _train_epoch(self, epoch: int) -> Dict[str, float]:
         """Train for one epoch - handles all model types"""
@@ -848,3 +1006,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

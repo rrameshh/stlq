@@ -17,7 +17,7 @@ def _detect_quantized_layers(custom_dict):
 
 
 def _transfer_weights_universal(pretrained_dict, custom_dict, weight_mapping, num_classes=100):
-    """Universal weight transfer function for all models"""
+
     transferred, skipped, errors = 0, 0, 0
     
     for pretrained_key, custom_key in weight_mapping.items():
@@ -64,7 +64,7 @@ def _finalize_loading(model, custom_dict, model_name):
     """Finalize weight loading for all models"""
     model.load_state_dict(custom_dict)
     _reset_quantization_params(model)
-    print(f"✅ Loaded pretrained {model_name} weights")
+    print(f"Loaded pretrained {model_name} weights")
     return model
 
 
@@ -260,7 +260,7 @@ def _create_swin_mapping(pretrained_dict, custom_dict, is_quantized):
 
 
 # ============================================================================
-# CNN MODELS (ResNet, MobileNet) - Simplified
+# CNN MODELS (ResNet, MobileNet)
 # ============================================================================
 
 def _load_cnn_weights(model, pretrained_model, weight_mapping, model_name, num_classes):
@@ -318,7 +318,7 @@ def _create_resnet_mapping(custom_dict, num_classes):
 
 
 # ============================================================================
-# PUBLIC API - Main Functions (much shorter!)
+# PUBLIC API - Main Functions
 # ============================================================================
 
 def load_pretrained_vit(model, variant="small", num_classes=100, img_size=224):

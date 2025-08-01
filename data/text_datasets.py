@@ -89,20 +89,95 @@ def download_text_file(url: str, filename: str) -> str:
         return f.read()
 
 
+# def get_shakespeare_dataloaders(batch_size=32, seq_len=128, val_split=0.1, 
+#                                num_workers=2, char_level=True):
+#     """
+#     Load Shakespeare dataset for character or word-level modeling
+    
+#     Args:
+#         batch_size: Batch size for training and validation
+#         seq_len: Sequence length for language modeling
+#         val_split: Fraction of data to use for validation
+#         num_workers: Number of data loading workers
+#         char_level: If True, use character-level; if False, use word-level
+    
+#     Returns:
+#         train_loader, val_loader, vocab_size
+#     """
+    
+#     # Download Shakespeare text
+#     url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+#     filename = "./data/shakespeare.txt"
+#     os.makedirs("./data", exist_ok=True)
+    
+#     text = download_text_file(url, filename)
+    
+#     # Split into train/val
+#     split_idx = int(len(text) * (1 - val_split))
+#     train_text = text[:split_idx]
+#     val_text = text[split_idx:]
+    
+#     # Create datasets
+#     if char_level:
+#         train_dataset = CharLevelDataset(train_text, seq_len)
+#         val_dataset = CharLevelDataset(val_text, seq_len)
+#         # Use same vocab as training set
+#         val_dataset.char_to_idx = train_dataset.char_to_idx
+#         val_dataset.idx_to_char = train_dataset.idx_to_char
+#         val_dataset.vocab_size = train_dataset.vocab_size
+#         vocab_size = train_dataset.vocab_size
+#     else:
+#         train_dataset = SimpleTokenDataset(train_text, seq_len)
+#         val_dataset = SimpleTokenDataset(val_text, seq_len)
+
+#         print(f"🔍 VOCAB DEBUG:")
+#         print(f"  Train vocab size: {len(train_dataset.vocab)}")
+#         print(f"  Val vocab size: {len(val_dataset.vocab)}")
+        
+#         train_words = set(train_dataset.vocab.keys())
+#         val_words = set(val_dataset.vocab.keys())
+#         overlap = train_words & val_words
+        
+#         print(f"  Vocabulary overlap: {len(overlap)}")
+#         print(f"  Train-only words: {len(train_words - val_words)}")
+#         print(f"  Val-only words: {len(val_words - train_words)}")
+
+#         if len(val_words - train_words) > 50:
+#             print(f"  🚨 VAL-ONLY WORDS: {list(val_words - train_words)[:20]}")
+#         # Use same vocab as training set  
+#         val_dataset.vocab = train_dataset.vocab
+#         val_dataset.idx_to_word = train_dataset.idx_to_word
+#         val_dataset.vocab_size = train_dataset.vocab_size
+#         vocab_size = train_dataset.vocab_size
+
+#     print(f"vocab size in text datasets {vocab_size}")
+    
+#     # Create data loaders
+#     train_loader = DataLoader(
+#         train_dataset, 
+#         batch_size=batch_size, 
+#         shuffle=True,
+#         num_workers=num_workers,
+#         pin_memory=True,
+#         drop_last=True
+#     )
+    
+#     val_loader = DataLoader(
+#         val_dataset,
+#         batch_size=batch_size,
+#         shuffle=False, 
+#         num_workers=num_workers,
+#         pin_memory=True
+#     )
+    
+#     return train_loader, val_loader, vocab_size
+    
+    # Fixed version for data/text_datasets.py
+
 def get_shakespeare_dataloaders(batch_size=32, seq_len=128, val_split=0.1, 
                                num_workers=2, char_level=True):
     """
-    Load Shakespeare dataset for character or word-level modeling
-    
-    Args:
-        batch_size: Batch size for training and validation
-        seq_len: Sequence length for language modeling
-        val_split: Fraction of data to use for validation
-        num_workers: Number of data loading workers
-        char_level: If True, use character-level; if False, use word-level
-    
-    Returns:
-        train_loader, val_loader, vocab_size
+    FIXED: Build vocabulary from full dataset before splitting
     """
     
     # Download Shakespeare text
@@ -127,20 +202,76 @@ def get_shakespeare_dataloaders(batch_size=32, seq_len=128, val_split=0.1,
         val_dataset.vocab_size = train_dataset.vocab_size
         vocab_size = train_dataset.vocab_size
     else:
-        train_dataset = SimpleTokenDataset(train_text, seq_len)
-        val_dataset = SimpleTokenDataset(val_text, seq_len)
-        # Use same vocab as training set  
-        val_dataset.vocab = train_dataset.vocab
-        val_dataset.idx_to_word = train_dataset.idx_to_word
-        val_dataset.vocab_size = train_dataset.vocab_size
-        vocab_size = train_dataset.vocab_size
-
-    print(f"vocab size in text datasets {vocab_size}")
+        # FIXED: Build vocabulary from FULL text, then apply to both splits
+        print("Building vocabulary from full dataset...")
+        
+        # Tokenize full text to get complete vocabulary
+        full_words = text.lower().split()
+        
+        # Get most common words from FULL dataset
+        from collections import Counter
+        word_counts = Counter(full_words)
+        vocab_size = 10000  # Keep your desired vocab size
+        most_common = word_counts.most_common(vocab_size - 4)  # Reserve special tokens
+        
+        # Create shared vocabulary
+        shared_vocab = {
+            '<pad>': 0, '<unk>': 1, '<bos>': 2, '<eos>': 3
+        }
+        for i, (word, _) in enumerate(most_common):
+            shared_vocab[word] = i + 4
+        
+        shared_vocab_size = len(shared_vocab)
+        shared_idx_to_word = {v: k for k, v in shared_vocab.items()}
+        
+        print(f"Built shared vocabulary: {shared_vocab_size} words")
+        
+        # Create train dataset with shared vocab
+        train_dataset = SimpleTokenDataset(train_text, seq_len, vocab_size)
+        # OVERRIDE with shared vocabulary
+        train_dataset.vocab = shared_vocab
+        train_dataset.idx_to_word = shared_idx_to_word
+        train_dataset.vocab_size = shared_vocab_size
+        
+        # Reprocess training data with shared vocab
+        train_words = train_text.lower().split()
+        train_dataset.data = []
+        for word in train_words:
+            idx = shared_vocab.get(word, shared_vocab['<unk>'])
+            train_dataset.data.append(idx)
+        
+        # Create val dataset with shared vocab
+        val_dataset = SimpleTokenDataset(val_text, seq_len, vocab_size)
+        # OVERRIDE with shared vocabulary
+        val_dataset.vocab = shared_vocab
+        val_dataset.idx_to_word = shared_idx_to_word
+        val_dataset.vocab_size = shared_vocab_size
+        
+        # Reprocess validation data with shared vocab
+        val_words = val_text.lower().split()
+        val_dataset.data = []
+        for word in val_words:
+            idx = shared_vocab.get(word, shared_vocab['<unk>'])
+            val_dataset.data.append(idx)
+        
+        vocab_size = shared_vocab_size
+        
+        # VERIFICATION DEBUG:
+        print(f"🔍 FIXED VOCAB DEBUG:")
+        print(f"  Train vocab size: {len(train_dataset.vocab)}")
+        print(f"  Val vocab size: {len(val_dataset.vocab)}")
+        print(f"  Vocabularies identical: {train_dataset.vocab == val_dataset.vocab}")
+        
+        # Check for unknown tokens
+        train_unks = sum(1 for idx in train_dataset.data if idx == shared_vocab['<unk>'])
+        val_unks = sum(1 for idx in val_dataset.data if idx == shared_vocab['<unk>'])
+        print(f"  Train <unk> tokens: {train_unks}/{len(train_dataset.data)} ({100*train_unks/len(train_dataset.data):.1f}%)")  
+        print(f"  Val <unk> tokens: {val_unks}/{len(val_dataset.data)} ({100*val_unks/len(val_dataset.data):.1f}%)")
     
     # Create data loaders
     train_loader = DataLoader(
-        train_dataset, 
-        batch_size=batch_size, 
+        train_dataset,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
         pin_memory=True,
@@ -150,7 +281,7 @@ def get_shakespeare_dataloaders(batch_size=32, seq_len=128, val_split=0.1,
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
-        shuffle=False, 
+        shuffle=False,
         num_workers=num_workers,
         pin_memory=True
     )
