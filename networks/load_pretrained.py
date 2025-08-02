@@ -353,6 +353,98 @@ def load_pretrained_swin(model, variant="tiny", num_classes=100, img_size=224):
     return _load_transformer_weights(model, timm_models[variant], num_classes, img_size, "swin")
 
 
+# networks/load_pretrained.py - FIXED RESNET LOADING
+
+def load_pretrained_resnet(model, variant="18", num_classes=100):
+    """Load pretrained ResNet weights - FIXED to handle different variants"""
+    
+    # Load the correct pretrained model based on variant
+    if variant == "18":
+        pretrained_model = models.resnet18(pretrained=True)
+        print("Loading ResNet-18 pretrained weights...")
+    elif variant == "50":
+        pretrained_model = models.resnet50(pretrained=True)
+        print("Loading ResNet-50 pretrained weights...")
+    elif variant == "34":
+        pretrained_model = models.resnet34(pretrained=True)
+        print("Loading ResNet-34 pretrained weights...")
+    elif variant == "101":
+        pretrained_model = models.resnet101(pretrained=True)
+        print("Loading ResNet-101 pretrained weights...")
+    else:
+        raise ValueError(f"Unsupported ResNet variant: {variant}")
+    
+    weight_mapping = _create_resnet_mapping(model.state_dict(), num_classes, variant)
+    return _load_cnn_weights(model, pretrained_model, weight_mapping, f"ResNet-{variant}", num_classes)
+
+def _create_resnet_mapping(custom_dict, num_classes, variant="18"):
+    """Create ResNet weight mapping - FIXED to handle different architectures"""
+    mapping = {
+        'conv1.weight': 'conv1.conv2d.weight',
+        'bn1.weight': 'conv1.bn2d.weight',
+        'bn1.bias': 'conv1.bn2d.bias',
+        'bn1.running_mean': 'conv1.bn2d.running_mean',
+        'bn1.running_var': 'conv1.bn2d.running_var',
+        'bn1.num_batches_tracked': 'conv1.bn2d.num_batches_tracked',
+    }
+    
+    # Determine the number of blocks per layer based on variant
+    if variant in ["18", "34"]:
+        # BasicBlock architectures
+        layer_blocks = [2, 2, 2, 2]  # ResNet-18/34
+        num_convs = 2  # BasicBlock has 2 convs
+    elif variant in ["50", "101", "152"]:
+        # Bottleneck architectures  
+        if variant == "50":
+            layer_blocks = [3, 4, 6, 3]  # ResNet-50
+        elif variant == "101":
+            layer_blocks = [3, 4, 23, 3]  # ResNet-101
+        else:  # variant == "152"
+            layer_blocks = [3, 8, 36, 3]  # ResNet-152
+        num_convs = 3  # Bottleneck has 3 convs
+    else:
+        raise ValueError(f"Unknown ResNet variant: {variant}")
+    
+    # Layer blocks - dynamically handle different numbers of blocks
+    for layer_idx in range(1, 5):
+        num_blocks = layer_blocks[layer_idx - 1]
+        for block_idx in range(num_blocks):
+            for conv_idx in range(1, num_convs + 1):
+                mapping.update({
+                    f'layer{layer_idx}.{block_idx}.conv{conv_idx}.weight': f'layer{layer_idx}.{block_idx}.conv{conv_idx}.conv2d.weight',
+                    f'layer{layer_idx}.{block_idx}.bn{conv_idx}.weight': f'layer{layer_idx}.{block_idx}.conv{conv_idx}.bn2d.weight',
+                    f'layer{layer_idx}.{block_idx}.bn{conv_idx}.bias': f'layer{layer_idx}.{block_idx}.conv{conv_idx}.bn2d.bias',
+                    f'layer{layer_idx}.{block_idx}.bn{conv_idx}.running_mean': f'layer{layer_idx}.{block_idx}.conv{conv_idx}.bn2d.running_mean',
+                    f'layer{layer_idx}.{block_idx}.bn{conv_idx}.running_var': f'layer{layer_idx}.{block_idx}.conv{conv_idx}.bn2d.running_var',
+                    f'layer{layer_idx}.{block_idx}.bn{conv_idx}.num_batches_tracked': f'layer{layer_idx}.{block_idx}.conv{conv_idx}.bn2d.num_batches_tracked',
+                })
+    
+    # Downsample layers (only for layers 2, 3, 4)
+    for layer_idx in [2, 3, 4]:
+        mapping.update({
+            f'layer{layer_idx}.0.downsample.0.weight': f'layer{layer_idx}.0.downsample.0.conv2d.weight',
+            f'layer{layer_idx}.0.downsample.1.weight': f'layer{layer_idx}.0.downsample.0.bn2d.weight',
+            f'layer{layer_idx}.0.downsample.1.bias': f'layer{layer_idx}.0.downsample.0.bn2d.bias',
+            f'layer{layer_idx}.0.downsample.1.running_mean': f'layer{layer_idx}.0.downsample.0.bn2d.running_mean',
+            f'layer{layer_idx}.0.downsample.1.running_var': f'layer{layer_idx}.0.downsample.0.bn2d.running_var',
+            f'layer{layer_idx}.0.downsample.1.num_batches_tracked': f'layer{layer_idx}.0.downsample.0.bn2d.num_batches_tracked',
+        })
+    
+    # Classifier - handle quantized vs non-quantized
+    if 'fc.linear.weight' in custom_dict:
+        # Quantized classifier
+        mapping.update({
+            'fc.weight': 'fc.linear.weight',
+            'fc.bias': 'fc.linear.bias',
+        })
+    else:
+        # Regular classifier
+        mapping.update({
+            'fc.weight': 'fc.weight',
+            'fc.bias': 'fc.bias',
+        })
+    
+    return mapping
 
 def load_pretrained_resnet(model, variant="18", num_classes=100):
     """Load pretrained ResNet weights - FIXED to handle different variants"""
