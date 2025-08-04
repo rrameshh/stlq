@@ -343,7 +343,7 @@ class UniversalQATTrainer:
                 from networks.load_pretrained import load_pretrained_mobilenet
                 variant =  self.args.model_variant
                 self.model = load_pretrained_mobilenet(
-                    self.model, mobilenet_version=variant, num_classes=self.num_classes
+                    self.model, version=variant, num_classes=self.num_classes
                 )
                 
             elif self.args.model_type == 'vit':
