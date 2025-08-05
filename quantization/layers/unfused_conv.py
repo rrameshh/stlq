@@ -10,12 +10,12 @@ from ..tensors.new_log import LogQuantizedTensor
 from ..strategies.factory import create_strategy
 from ..quant_config import QuantizationConfig
 
-from .all import UnifiedQuantizedOperator
+from .all import Quantizer
 
 # Type alias for any quantized tensor
 QuantizedTensorType = Union[LinearQuantizedTensor, LogQuantizedTensor]
 
-class UnifiedQuantizedConvBatchNormUnfused(UnifiedQuantizedOperator):
+class UnifiedQuantizedConvBatchNormUnfused(Quantizer):
     """Unfused Conv2d+BN+ReLU layer - applies conv and bn separately (no weight fusion)"""
     
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0,

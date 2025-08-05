@@ -4,13 +4,12 @@ import torch.nn as nn
 from typing import Optional, List, Union
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedConv2dBatchNorm2dReLU, 
-    UnifiedQuantizedLinear,
-    UnifiedQuantizedAdd,
-    UnifiedQuantizedReLU,
+    Quantizer,
+    QConv2dBNRelu, 
+    QLinear,
+    QAdd,
     UnifiedQuantizedAdaptiveAvgPool2d,
-    UnifiedQuantizedFlatten
+    QFlatten
 )
 from quantization.quant_config import QuantizationConfig
 
@@ -94,7 +93,7 @@ class MobileNetV2Block(nn.Module):
         self.conv = nn.Sequential(*layers)
         
         if self.use_residual:
-            self.add = UnifiedQuantizedAdd(config=config)
+            self.add = QAdd(config=config)
 
     def forward(self, x):
         out = self.conv(x)
@@ -123,11 +122,11 @@ class UnifiedMobileNetV1(nn.Module):
         
         input_channel = _make_divisible(32 * width_multiplier)
         
-        self.quantize = UnifiedQuantize(config=config)
+        self.quantize = Quantizer(config=config)
         
         # First conv layer
         self.features = nn.ModuleList([
-            UnifiedQuantizedConv2dBatchNorm2dReLU(
+            QConv2dBNRelu(
                 3, input_channel, kernel_size=3, stride=2, padding=1,
                 bias=False, activation="relu", config=config
             )
@@ -149,8 +148,8 @@ class UnifiedMobileNetV1(nn.Module):
             input_channel = output_channel
         
         self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
-        self.flatten = UnifiedQuantizedFlatten(1, config=config)
-        self.classifier = UnifiedQuantizedLinear(input_channel, num_classes, config=config)
+        self.flatten = QFlatten(1, config=config)
+        self.classifier = QLinear(input_channel, num_classes, config=config)
         
         self._initialize_weights()
 
@@ -211,7 +210,7 @@ class UnifiedMobileNetV2(nn.Module):
         input_channel = _make_divisible(32 * width_multiplier)
         last_channel = _make_divisible(1280 * max(1.0, width_multiplier))
         
-        self.quantize = UnifiedQuantize(config=config)
+        self.quantize = Quantizer(config=config)
         
         # First conv layer
         self.features = nn.ModuleList([
@@ -250,8 +249,8 @@ class UnifiedMobileNetV2(nn.Module):
         ))
         
         self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
-        self.flatten = UnifiedQuantizedFlatten(1, config=config)
-        self.classifier = UnifiedQuantizedLinear(last_channel, num_classes, config=config)
+        self.flatten = QFlatten(1, config=config)
+        self.classifier = QLinear(last_channel, num_classes, config=config)
         
         self._initialize_weights()
 

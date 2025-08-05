@@ -6,8 +6,8 @@ from typing import Tuple
 import math
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedLinear,
+    Quantizer,
+    QLinear,
 )
 from quantization.quant_config import QuantizationConfig
 from quantization.tensors.linear import LinearQuantizedTensor
@@ -94,9 +94,9 @@ class WindowAttention(nn.Module):
         else:
             self.window_size = window_size
             
-        self.qkv = UnifiedQuantizedLinear(dim, dim * 3, bias=qkv_bias, config=config)
-        self.proj = UnifiedQuantizedLinear(dim, dim, config=config)
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.qkv = QLinear(dim, dim * 3, bias=qkv_bias, config=config)
+        self.proj = QLinear(dim, dim, config=config)
+        self.input_quantizer = Quantizer(config=config)
         
         # Relative position bias with proper window size handling
         self.relative_position_bias_table = nn.Parameter(
@@ -275,7 +275,7 @@ class PatchMerging(nn.Module):
         super().__init__()
         self.input_resolution = input_resolution
         self.dim = dim
-        self.reduction = UnifiedQuantizedLinear(4 * dim, 2 * dim, bias=False, config=config)
+        self.reduction = QLinear(4 * dim, 2 * dim, bias=False, config=config)
         self.norm = nn.LayerNorm(4 * dim)
     
     def forward(self, x):
@@ -448,8 +448,8 @@ class SwinTransformer(nn.Module):
             final_dim = int(embed_dim * 2 ** (self.num_layers - 1))
             quantize_classifier = getattr(config, 'quantize_classifier', False)
             if quantize_classifier:
-                self.head = UnifiedQuantizedLinear(final_dim, num_classes, config=config)
-                self.head_quantizer = UnifiedQuantize(config=config)
+                self.head = QLinear(final_dim, num_classes, config=config)
+                self.head_quantizer = Quantizer(config=config)
             else:
                 self.head = nn.Linear(final_dim, num_classes) if num_classes > 0 else nn.Identity()
         

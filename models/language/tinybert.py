@@ -6,8 +6,8 @@ from typing import Optional, Tuple
 import math
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedLinear,
+    Quantizer,
+    QLinear,
 )
 from quantization.quant_config import QuantizationConfig
 from quantization.tensors.linear import LinearQuantizedTensor
@@ -74,14 +74,14 @@ class BERTAttention(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers (like your ViT)
-        self.qkv = UnifiedQuantizedLinear(hidden_size, hidden_size * 3, bias=True, config=config)
-        self.out_proj = UnifiedQuantizedLinear(hidden_size, hidden_size, bias=True, config=config)
+        self.qkv = QLinear(hidden_size, hidden_size * 3, bias=True, config=config)
+        self.out_proj = QLinear(hidden_size, hidden_size, bias=True, config=config)
         
         # FP32: Lightweight operations
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
     
     def forward(self, hidden_states, attention_mask=None):
         """
@@ -149,15 +149,15 @@ class BERTMLP(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers
-        self.dense1 = UnifiedQuantizedLinear(hidden_size, intermediate_size, config=config)
-        self.dense2 = UnifiedQuantizedLinear(intermediate_size, hidden_size, config=config)
+        self.dense1 = QLinear(hidden_size, intermediate_size, config=config)
+        self.dense2 = QLinear(intermediate_size, hidden_size, config=config)
         
         # FP32: Activation and dropout
         self.act = nn.GELU()
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
     
     def forward(self, hidden_states):
         """Same flow as your ViT/TinyGPT MLP"""
@@ -250,8 +250,8 @@ class BERTPooler(nn.Module):
         # Classification head choice
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
-            self.dense = UnifiedQuantizedLinear(hidden_size, hidden_size, config=config)
-            self.pooler_quantizer = UnifiedQuantize(config=config)
+            self.dense = QLinear(hidden_size, hidden_size, config=config)
+            self.pooler_quantizer = Quantizer(config=config)
         else:
             # Industry standard: Keep pooler in FP32
             self.dense = nn.Linear(hidden_size, hidden_size)
@@ -313,8 +313,8 @@ class TinyBERT(nn.Module):
         # Classification head
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
-            self.classifier = UnifiedQuantizedLinear(hidden_size, num_classes, config=config)
-            self.classifier_quantizer = UnifiedQuantize(config=config)
+            self.classifier = QLinear(hidden_size, num_classes, config=config)
+            self.classifier_quantizer = Quantizer(config=config)
         else:
             # Industry standard: Keep classifier in FP32
             self.classifier = nn.Linear(hidden_size, num_classes) if num_classes > 0 else nn.Identity()
@@ -442,3 +442,4 @@ def tiny_bert_small(**kwargs):
 
 def tiny_bert_base(**kwargs):
     return create_tiny_bert("base", **kwargs)
+

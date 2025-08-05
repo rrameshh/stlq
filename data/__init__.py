@@ -1,6 +1,6 @@
-# data/__init__.py - Single entry point for all data loading
-from .vision import get_cifar10_dataloaders, get_imagenet100_dataloaders
-from .language import get_shakespeare_dataloaders, get_imdb_dataloaders, get_sst2_dataloaders
+# data/__init__.py - Fixed imports
+from .vision_datasets import get_cifar10_dataloaders, get_imagenet100_dataloaders
+from .text_datasets import get_shakespeare_dataloaders, get_imdb_dataloaders, get_sst2_dataloaders
 
 DATA_LOADERS = {
     'cifar10': get_cifar10_dataloaders,
@@ -29,7 +29,7 @@ def get_data_loaders(config):
     if dataset in ['shakespeare']:
         kwargs.update({
             'seq_len': config.data.seq_len,
-            'char_level': config.model.char_level,
+            'char_level': getattr(config.model, 'char_level', True),
         })
     elif dataset in ['imdb', 'sst2']:
         kwargs.update({
@@ -54,6 +54,3 @@ def get_data_loaders(config):
         elif dataset == 'imagenet100':
             config.model.num_classes = 100
         return result
-    
-
-    

@@ -162,3 +162,26 @@ class QuantizedOperatorBase(nn.Module):
     def __repr__(self):
         info = self.get_quantization_info()
         return f"{info['type']}(activation_quantization={info['activation_quantization']}, method={info.get('quantization_method', 'unknown')})"
+    
+
+
+class QuantizedModule(nn.Module):
+    """Base class for models with quantization support."""
+    
+    def __init__(self, config=None):
+        super().__init__()
+        self.config = config
+        if config and hasattr(config, 'device'):
+            self.device = config.device
+    
+    def dequantize_output(self, x):
+        """Helper to dequantize any tensor type."""
+        if hasattr(x, 'dequantize'):
+            return x.dequantize()
+        return x
+    
+    def to(self, device):
+        """Override to ensure device is tracked."""
+        result = super().to(device)
+        result.device = device
+        return result

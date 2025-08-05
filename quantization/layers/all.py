@@ -11,9 +11,9 @@ from ..strategies.factory import create_strategy
 from ..quant_config import QuantizationConfig
 
 # Type alias for any quantized tensor
-QuantizedTensorType = Union[LinearQuantizedTensor]
+QuantizedTensorType = LinearQuantizedTensor
 
-class UnifiedQuantizedOperator(QuantizedOperatorBase):
+class Quantizer(QuantizedOperatorBase):
     """Base class for unified quantization operators that use strategy pattern"""
     
     def __init__(self, config: QuantizationConfig):
@@ -66,7 +66,7 @@ class UnifiedQuantizedOperator(QuantizedOperatorBase):
         
 
 
-class Quantize(UnifiedQuantizedOperator):
+class Quantize(Quantizer):
     """Unified input quantization layer"""
     
     def forward(self, input: torch.Tensor) -> QuantizedTensorType:
@@ -78,7 +78,7 @@ class Quantize(UnifiedQuantizedOperator):
             return input
 
 
-class QConv2dBNRelu(UnifiedQuantizedOperator):
+class QConv2dBNRelu(Quantizer):
     """Unified Conv2d+BN+ReLU layer with strategy-based weight quantization"""
     
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0,
@@ -200,7 +200,7 @@ class QConv2dBNRelu(UnifiedQuantizedOperator):
             return self._activation_not_quantized_forward(input)
 
 
-class QLinear(UnifiedQuantizedOperator):
+class QLinear(Quantizer):
     """Unified Linear layer with strategy-based weight quantization"""
     
     def __init__(self, in_features: int, out_features: int, bias: bool = True, 
@@ -249,7 +249,7 @@ class QLinear(UnifiedQuantizedOperator):
     
 
 
-class QAdd(UnifiedQuantizedOperator):
+class QAdd(Quantizer):
     """Unified Add layer - handles different tensor types"""
     def _rescale_to_common_scale(self, x: QuantizedTensorType, y: QuantizedTensorType):
         """Rescale tensors to common scale for addition"""
@@ -285,7 +285,7 @@ class QAdd(UnifiedQuantizedOperator):
             return output
 
 
-class QRelu(UnifiedQuantizedOperator):
+class QRelu(Quantizer):
     """Unified ReLU - just applies ReLU and updates stats"""
 
     #no def__init__
@@ -309,7 +309,7 @@ class QRelu(UnifiedQuantizedOperator):
             return output
 
 
-class UnifiedQuantizedAdaptiveAvgPool2d(UnifiedQuantizedOperator):
+class UnifiedQuantizedAdaptiveAvgPool2d(Quantizer):
     """Unified Adaptive Average Pooling"""
     
     def __init__(self, output_size, config: QuantizationConfig):
@@ -335,7 +335,7 @@ class UnifiedQuantizedAdaptiveAvgPool2d(UnifiedQuantizedOperator):
   
 
 
-class QMaxPool2d(UnifiedQuantizedOperator):
+class QMaxPool2d(Quantizer):
     """Unified Max Pooling"""
     
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1, config: QuantizationConfig = None):
@@ -365,7 +365,7 @@ class QMaxPool2d(UnifiedQuantizedOperator):
             return F.max_pool2d(input, self.kernel_size, self.stride, self.padding, self.dilation)
 
 
-class QFlatten(UnifiedQuantizedOperator):
+class QFlatten(Quantizer):
     """Unified Flatten - just reshapes tensors"""
     
     def __init__(self, start_dim, end_dim=-1, config: QuantizationConfig = None):

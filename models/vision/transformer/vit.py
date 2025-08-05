@@ -6,8 +6,8 @@ from typing import Optional
 import math
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedLinear,
+    Quantizer,
+    QLinear,
 )
 from quantization.quant_config import QuantizationConfig
 from quantization.tensors.linear import LinearQuantizedTensor
@@ -61,15 +61,15 @@ class SelectiveQuantizedMultiHeadAttention(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers
-        self.qkv = UnifiedQuantizedLinear(dim, dim * 3, bias=qkv_bias, config=config)
-        self.proj = UnifiedQuantizedLinear(dim, dim, bias=qkv_bias, config=config)
+        self.qkv = QLinear(dim, dim * 3, bias=qkv_bias, config=config)
+        self.proj = QLinear(dim, dim, bias=qkv_bias, config=config)
         
         # FP32: Lightweight operations
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj_drop = nn.Dropout(proj_drop)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
     
     def forward(self, x):
         """
@@ -147,15 +147,15 @@ class SelectiveQuantizedMLP(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers
-        self.fc1 = UnifiedQuantizedLinear(in_features, hidden_features, config=config)
-        self.fc2 = UnifiedQuantizedLinear(hidden_features, out_features, config=config)
+        self.fc1 = QLinear(in_features, hidden_features, config=config)
+        self.fc2 = QLinear(hidden_features, out_features, config=config)
         
         # FP32: Activation and dropout
         self.act = act_layer() if act_layer else nn.GELU()
         self.drop = nn.Dropout(drop)
         
         # Input quantizer
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
     
     def forward(self, x):
         """
@@ -328,8 +328,8 @@ class ViT(nn.Module):
         # Classification head
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
-            self.head = UnifiedQuantizedLinear(embed_dim, num_classes, config=config)
-            self.head_quantizer = UnifiedQuantize(config=config)
+            self.head = QLinear(embed_dim, num_classes, config=config)
+            self.head_quantizer = Quantizer(config=config)
         else:
             # Industry standard: Keep classifier in FP32
             self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()

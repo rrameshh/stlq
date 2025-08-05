@@ -8,6 +8,7 @@ from .vision.transformer.vit import industry_vit_tiny as vit_tiny, industry_vit_
 from .vision.transformer.deit import deit_tiny, deit_small, deit_base
 from .vision.transformer.swin import swin_tiny, swin_small, swin_base
 from .language.tinybert import tiny_bert_tiny, tiny_bert_mini, tiny_bert_small, tiny_bert_base
+from .language.tinygpt import tiny_gpt_micro, tiny_gpt_mini, tiny_gpt_nano, tiny_gpt_small
 
 # Import consolidated pretrained loading
 from .pretrained import load_pretrained_weights
@@ -34,10 +35,15 @@ MODELS = {
     'swin_base': swin_base,
     
     # Language models
-    'tinybert_tiny': tiny_bert_tiny,
+     'tinybert_tiny': tiny_bert_tiny,
     'tinybert_mini': tiny_bert_mini,
     'tinybert_small': tiny_bert_small,
     'tinybert_base': tiny_bert_base,
+    'tinygpt_nano': tiny_gpt_nano,
+    'tinygpt_micro': tiny_gpt_micro,
+    'tinygpt_mini': tiny_gpt_mini,
+    'tinygpt_small': tiny_gpt_small
+
 }
 
 def create_model(model_name: str, pretrained: bool = False, **kwargs):
@@ -64,7 +70,7 @@ def create_model(model_name: str, pretrained: bool = False, **kwargs):
     if pretrained:
         try:
             model = load_pretrained_weights(model, model_name, **kwargs)
-            print(f"✅ Loaded pretrained weights for {model_name}")
+            print(f"Loaded pretrained weights for {model_name}")
         except Exception as e:
             print(f"⚠️  Warning: Failed to load pretrained weights for {model_name}: {e}")
             print("Continuing with random initialization...")

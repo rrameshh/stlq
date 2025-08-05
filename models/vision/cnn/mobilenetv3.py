@@ -6,13 +6,13 @@ from typing import Optional, List, Union
 import math
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedConv2dBatchNorm2dReLU, 
-    UnifiedQuantizedLinear,
-    UnifiedQuantizedAdd,
-    UnifiedQuantizedReLU,
+    Quantizer,
+    QConv2dBNRelu, 
+    QLinear,
+    QAdd,
+    QRelu,
     UnifiedQuantizedAdaptiveAvgPool2d,
-    UnifiedQuantizedFlatten
+    QFlatten
 )
 from quantization.quant_config import QuantizationConfig
 from quantization.layers.unfused_conv import UnifiedQuantizedConvBatchNormUnfused
@@ -37,14 +37,14 @@ class SEModule(nn.Module):
         
         # QUANTIZED: Heavy compute operations
         self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
-        self.fc1 = UnifiedQuantizedLinear(channels, reduced_channels, config=config)
-        self.fc2 = UnifiedQuantizedLinear(reduced_channels, channels, config=config)
+        self.fc1 = QLinear(channels, reduced_channels, config=config)
+        self.fc2 = QLinear(reduced_channels, channels, config=config)
         
         # FP32: Lightweight, numerically sensitive operations
         self.hardsigmoid = nn.Hardsigmoid(inplace=True)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
         
     def forward(self, x):
         """
@@ -169,7 +169,7 @@ class MobileNetV3Block(nn.Module):
         self.conv = nn.Sequential(*layers)
         
         if self.use_residual:
-            self.add = UnifiedQuantizedAdd(config=config)
+            self.add = QAdd(config=config)
 
     def forward(self, x):
         out = self.conv(x)
@@ -178,7 +178,7 @@ class MobileNetV3Block(nn.Module):
         return out
 
 
-class UnifiedMobileNetV3(nn.Module):
+class MobileNetV3(nn.Module):
     """MobileNetV3 with unified quantization support"""
     
     def __init__(self, config: QuantizationConfig, variant="large", num_classes: int = 1000, 
@@ -201,7 +201,7 @@ class UnifiedMobileNetV3(nn.Module):
         
         # First conv layer
         input_channel = _make_divisible(16 * width_multiplier)
-        self.quantize = UnifiedQuantize(config=config)
+        self.quantize = Quantizer(config=config)
         
         self.features = nn.ModuleList([
             UnifiedQuantizedConvBatchNormUnfused(
@@ -229,18 +229,18 @@ class UnifiedMobileNetV3(nn.Module):
         
         # Classifier
         self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
-        self.flatten = UnifiedQuantizedFlatten(1, config=config)
+        self.flatten = QFlatten(1, config=config)
         
         # Classifier head with optional intermediate layer for large variant
         if variant == "large":
             classifier_input = last_channel
-            self.pre_classifier = UnifiedQuantizedLinear(
+            self.pre_classifier = QLinear(
                 classifier_input, 1280, bias=True, config=config
             )
-            self.classifier = UnifiedQuantizedLinear(1280, num_classes, config=config)
+            self.classifier = QLinear(1280, num_classes, config=config)
         else:
             classifier_input = last_channel
-            self.classifier = UnifiedQuantizedLinear(classifier_input, num_classes, config=config)
+            self.classifier = QLinear(classifier_input, num_classes, config=config)
         
         self._initialize_weights()
     
@@ -331,7 +331,7 @@ def create_mobilenetv3(
     variant: str,
     quantization_method: str = "linear",
     **kwargs
-) -> UnifiedMobileNetV3:
+) -> MobileNetV3:
     """
     Factory function to create a unified MobileNetV3 with specified quantization method.
     
@@ -355,7 +355,7 @@ def create_mobilenetv3(
         bits=bits
     )
     
-    return UnifiedMobileNetV3(config=config, variant=variant, **kwargs)
+    return MobileNetV3(config=config, variant=variant, **kwargs)
 
 
 def mobilenetv3_large(quantization_method="linear", **kwargs):

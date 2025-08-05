@@ -20,10 +20,10 @@ except ImportError:
 # Import unified layers
 try:
     from .layers.all import (
-        UnifiedQuantize, UnifiedQuantizedConv2dBatchNorm2dReLU, 
-        QLinear, UnifiedQuantizedAdd, UnifiedQuantizedReLU,
-        UnifiedQuantizedMaxPool2d, UnifiedQuantizedAdaptiveAvgPool2d,
-        UnifiedQuantizedFlatten
+        UnifiedQuantize, QConv2dBNRelu, 
+        QLinear, QAdd, QRelu,
+        QMaxPool2d, UnifiedQuantizedAdaptiveAvgPool2d,
+        QFlatten
     )
 except ImportError:
     pass

@@ -9,7 +9,7 @@ from .vit import (
     SelectiveQuantizedTransformerBlock,
     PatchEmbedding
 )
-from quantization.layers.all import UnifiedQuantizedLinear, UnifiedQuantize
+from quantization.layers.all import QLinear, Quantizer
 from quantization.quant_config import QuantizationConfig
 
 
@@ -64,9 +64,9 @@ class DeiT(ViT):
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             # Both heads quantized (buggy)
-            self.head_cls = UnifiedQuantizedLinear(embed_dim, num_classes, config=config)
-            self.head_dist = UnifiedQuantizedLinear(embed_dim, num_classes, config=config)
-            self.head_quantizer = UnifiedQuantize(config=config)
+            self.head_cls = QLinear(embed_dim, num_classes, config=config)
+            self.head_dist = QLinear(embed_dim, num_classes, config=config)
+            self.head_quantizer = Quantizer(config=config)
         else:
             # Keep heads in FP32
             self.head_cls = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()

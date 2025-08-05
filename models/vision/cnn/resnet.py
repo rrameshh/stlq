@@ -1,17 +1,17 @@
-# networks/unified_resnet.py
+
 from typing import Optional, Type, List, Union, Any
 import torch
 import torch.nn as nn
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedConv2dBatchNorm2dReLU, 
-    UnifiedQuantizedLinear,
-    UnifiedQuantizedAdd,
-    UnifiedQuantizedReLU,
-    UnifiedQuantizedMaxPool2d,
+    Quantizer,
+    QConv2dBNRelu, 
+    QLinear,
+    QAdd,
+    QRelu,
+    QMaxPool2d,
     UnifiedQuantizedAdaptiveAvgPool2d,
-    UnifiedQuantizedFlatten
+    QFlatten
 )
 from quantization.quant_config import QuantizationConfig
 
@@ -19,7 +19,7 @@ from quantization.quant_config import QuantizationConfig
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, 
            dilation: int = 1, activation=None, config: QuantizationConfig = None):
     """3x3 convolution with padding"""
-    return UnifiedQuantizedConv2dBatchNorm2dReLU(
+    return QConv2dBNRelu(
         in_planes, out_planes, kernel_size=3, stride=stride,
         padding=dilation, groups=groups, bias=False, dilation=dilation,
         activation=activation, config=config
@@ -29,7 +29,7 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1,
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1, activation=None,
            config: QuantizationConfig = None):
     """1x1 convolution"""
-    return UnifiedQuantizedConv2dBatchNorm2dReLU(
+    return QConv2dBNRelu(
         in_planes, out_planes, kernel_size=1, stride=stride, bias=False,
         activation=activation, config=config
     )
@@ -57,8 +57,8 @@ class BasicBlock(nn.Module):
 
         self.conv1 = conv3x3(inplanes, planes, stride, activation="relu", config=config)
         self.conv2 = conv3x3(planes, planes, config=config)
-        self.relu = UnifiedQuantizedReLU(config=config)
-        self.add = UnifiedQuantizedAdd(config=config)
+        self.relu = QRelu(config=config)
+        self.add = QAdd(config=config)
         self.downsample = downsample
         self.stride = stride
 
@@ -97,8 +97,8 @@ class Bottleneck(nn.Module):
         self.conv1 = conv1x1(inplanes, width, activation="relu", config=config)
         self.conv2 = conv3x3(width, width, stride, groups, dilation, activation="relu", config=config)
         self.conv3 = conv1x1(width, planes * self.expansion, config=config)
-        self.relu = UnifiedQuantizedReLU(config=config)
-        self.add = UnifiedQuantizedAdd(config=config)
+        self.relu = QRelu(config=config)
+        self.add = QAdd(config=config)
         self.downsample = downsample
         self.stride = stride
 
@@ -118,7 +118,7 @@ class Bottleneck(nn.Module):
         return out
 
 
-class UnifiedResNet(nn.Module):
+class ResNet(nn.Module):
     """Single ResNet implementation that works with any quantization method"""
     
     def __init__(
@@ -150,12 +150,12 @@ class UnifiedResNet(nn.Module):
             )
 
         # All layers use the same config - this is the key to unified approach!
-        self.quantize = UnifiedQuantize(config=config)
-        self.conv1 = UnifiedQuantizedConv2dBatchNorm2dReLU(
+        self.quantize = Quantizer(config=config)
+        self.conv1 = QConv2dBNRelu(
             3, self.inplanes, kernel_size=7, stride=2, padding=3, 
             bias=False, activation="relu", config=config
         )
-        self.maxpool = UnifiedQuantizedMaxPool2d(kernel_size=3, stride=2, padding=1, config=config)
+        self.maxpool = QMaxPool2d(kernel_size=3, stride=2, padding=1, config=config)
         
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
@@ -163,8 +163,8 @@ class UnifiedResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         
         self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
-        self.flatten = UnifiedQuantizedFlatten(1, config=config)
-        self.fc = UnifiedQuantizedLinear(512 * block.expansion, num_classes, config=config)
+        self.flatten = QFlatten(1, config=config)
+        self.fc = QLinear(512 * block.expansion, num_classes, config=config)
 
         # Standard initialization
         for m in self.modules():
@@ -250,7 +250,7 @@ def create_resnet(
     layers: List[int],
     quantization_method: str = "linear",
     **kwargs
-) -> UnifiedResNet:
+) -> ResNet:
     """
     Factory function to create a unified ResNet with specified quantization method.
     
@@ -275,7 +275,7 @@ def create_resnet(
         bits = bits
     )
     
-    return UnifiedResNet(block_type, layers, config=config, **kwargs)
+    return ResNet(block_type, layers, config=config, **kwargs)
 
 
 def resnet18(quantization_method="linear", **kwargs):

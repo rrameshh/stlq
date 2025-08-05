@@ -6,8 +6,8 @@ from typing import Optional
 import math
 
 from quantization.layers.all import (
-    UnifiedQuantize,
-    UnifiedQuantizedLinear,
+    Quantizer,
+    QLinear,
 )
 from quantization.quant_config import QuantizationConfig
 from quantization.tensors.linear import LinearQuantizedTensor
@@ -26,14 +26,14 @@ class GPTAttention(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers (like your ViT)
-        self.qkv = UnifiedQuantizedLinear(dim, dim * 3, bias=True, config=config)
-        self.proj = UnifiedQuantizedLinear(dim, dim, bias=True, config=config)
+        self.qkv = QLinear(dim, dim * 3, bias=True, config=config)
+        self.proj = QLinear(dim, dim, bias=True, config=config)
         
         # FP32: Lightweight operations
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
         
         # Causal mask (will be registered as buffer)
         self.register_buffer("causal_mask", None)
@@ -111,15 +111,15 @@ class GPTMLP(nn.Module):
         self.config = config
         
         # QUANTIZED: Heavy compute linear layers
-        self.fc1 = UnifiedQuantizedLinear(dim, hidden_dim, config=config)
-        self.fc2 = UnifiedQuantizedLinear(hidden_dim, dim, config=config)
+        self.fc1 = QLinear(dim, hidden_dim, config=config)
+        self.fc2 = QLinear(hidden_dim, dim, config=config)
         
         # FP32: Activation and dropout
         self.act = nn.GELU()
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer
-        self.input_quantizer = UnifiedQuantize(config=config)
+        self.input_quantizer = Quantizer(config=config)
     
     def forward(self, x):
         """Same flow as your ViT MLP"""
@@ -222,8 +222,8 @@ class TinyGPT(nn.Module):
         # Language modeling head
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
-            self.lm_head = UnifiedQuantizedLinear(dim, vocab_size, config=config)
-            self.head_quantizer = UnifiedQuantize(config=config)
+            self.lm_head = QLinear(dim, vocab_size, config=config)
+            self.head_quantizer = Quantizer(config=config)
         else:
             # Tie weights with token embedding (standard practice)
             self.lm_head = nn.Linear(dim, vocab_size, bias=False)
