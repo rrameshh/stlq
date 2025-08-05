@@ -1,6 +1,6 @@
 # utils/quantization_metrics.py - Quantization Analysis and Logging
 import torch
-from ops.tensors.new_log import LogQuantizedTensor
+from quantization.tensors.new_log import LogQuantizedTensor
 
 def compute_second_word_ratio(model):
     """
