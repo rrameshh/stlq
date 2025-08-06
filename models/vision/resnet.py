@@ -1,4 +1,4 @@
-
+# # models/vision/cnn/resnet.py
 from typing import Optional, Type, List, Union, Any
 import torch
 import torch.nn as nn
@@ -244,45 +244,69 @@ class ResNet(nn.Module):
         return x
 
 
-# Factory functions
-def create_resnet(
-    block_type: Type[Union[BasicBlock, Bottleneck]],
-    layers: List[int],
-    quantization_method: str = "linear",
-    **kwargs
-) -> ResNet:
-    """
-    Factory function to create a unified ResNet with specified quantization method.
+# # Factory functions
+# def create_resnet(
+#     block_type: Type[Union[BasicBlock, Bottleneck]],
+#     layers: List[int],
+#     quantization_method: str = "linear",
+#     **kwargs
+# ) -> UnifiedResNet:
+#     """
+#     Factory function to create a unified ResNet with specified quantization method.
     
-    Args:
-        block_type: BasicBlock or Bottleneck
-        layers: Number of blocks in each layer
-        quantization_method: 'linear' or 'log'
-        **kwargs: Additional arguments (num_classes, device, etc.)
-    """
-    # Extract config-specific parameters
-    device = kwargs.pop('device', None)
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
+#     Args:
+#         block_type: BasicBlock or Bottleneck
+#         layers: Number of blocks in each layer
+#         quantization_method: 'linear' or 'log'
+#         **kwargs: Additional arguments (num_classes, device, etc.)
+#     """
+#     # Extract config-specific parameters
+#     device = kwargs.pop('device', None)
+#     threshold = kwargs.pop('threshold', 1e-5)
+#     momentum = kwargs.pop('momentum', 0.1)
+#     bits = kwargs.pop('bits', 8)
     
-    # Create config based on method
+#     # Create config based on method
+#     config = QuantizationConfig(
+#         method=quantization_method,
+#         momentum=momentum,
+#         device=device,
+#         threshold=threshold,
+#         bits = bits
+#     )
+    
+#     return UnifiedResNet(block_type, layers, config=config, **kwargs)
+
+
+# def resnet18(quantization_method="linear", **kwargs):
+#     """ResNet-18 with unified quantization"""
+#     return create_resnet(BasicBlock, [2, 2, 2, 2], quantization_method, **kwargs)
+
+
+# def resnet50(quantization_method="linear", **kwargs):
+#     """ResNet-50 with unified quantization"""
+#     return create_resnet(Bottleneck, [3, 4, 6, 3], quantization_method, **kwargs)
+    
+
+# DELETE create_resnet entirely
+# DELETE create_mobilenetv3 entirely
+
+def resnet18(main_config, **kwargs):
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits = bits
+        method=main_config.quantization.method,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
-    
-    return ResNet(block_type, layers, config=config, **kwargs)
+    return ResNet(BasicBlock, [2, 2, 2, 2], config=config, 
+                  num_classes=main_config.model.num_classes, **kwargs)
 
-
-def resnet18(quantization_method="linear", **kwargs):
-    """ResNet-18 with unified quantization"""
-    return create_resnet(BasicBlock, [2, 2, 2, 2], quantization_method, **kwargs)
-
-
-def resnet50(quantization_method="linear", **kwargs):
-    """ResNet-50 with unified quantization"""
-    return create_resnet(Bottleneck, [3, 4, 6, 3], quantization_method, **kwargs)
+def resnet50(main_config, **kwargs):
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    return ResNet(Bottleneck, [3, 4, 6, 3], config=config,
+                  num_classes=main_config.model.num_classes, **kwargs)

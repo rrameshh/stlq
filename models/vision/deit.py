@@ -226,56 +226,112 @@ class DeiTLoss(nn.Module):
         }
 
 
-# Factory functions
-def create_deit(
-    variant="small", 
-    quantization_method="linear", 
-    teacher_model=None,
-    **kwargs
-) -> DeiT:
-    """
-    Create DeiT model using the corrected implementation
-    """
+# # Factory functions
+# def create_deit(
+#     variant="small", 
+#     quantization_method="linear", 
+#     teacher_model=None,
+#     **kwargs
+# ) -> DeiT:
+#     """
+#     Create DeiT model using the corrected implementation
+#     """
     
-    configs = {
-        "tiny": {"embed_dim": 192, "depth": 12, "num_heads": 3},
-        "small": {"embed_dim": 384, "depth": 12, "num_heads": 6}, 
-        "base": {"embed_dim": 768, "depth": 12, "num_heads": 12},
-    }
+#     configs = {
+#         "tiny": {"embed_dim": 192, "depth": 12, "num_heads": 3},
+#         "small": {"embed_dim": 384, "depth": 12, "num_heads": 6}, 
+#         "base": {"embed_dim": 768, "depth": 12, "num_heads": 12},
+#     }
     
-    if variant not in configs:
-        raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
+#     if variant not in configs:
+#         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
     
-    # Extract config parameters
-    device = kwargs.pop('device', 'cuda:0')
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
-    quantize_classifier = kwargs.pop('quantize_classifier', False)
+#     # Extract config parameters
+#     device = kwargs.pop('device', 'cuda:0')
+#     threshold = kwargs.pop('threshold', 1e-5)
+#     momentum = kwargs.pop('momentum', 0.1)
+#     bits = kwargs.pop('bits', 8)
+#     quantize_classifier = kwargs.pop('quantize_classifier', False)
     
-    # Create quantization config
+#     # Create quantization config
+#     config = QuantizationConfig(
+#         method=quantization_method,
+#         momentum=momentum,
+#         device=device,
+#         threshold=threshold,
+#         bits=bits
+#     )
+#     config.quantize_classifier = quantize_classifier
+    
+#     # Merge configs
+#     model_config = configs[variant]
+#     model_config.update(kwargs)
+    
+#     return DeiT(config=config, teacher_model=teacher_model, **model_config)
+
+
+# # Convenient factory functions
+# def deit_tiny(**kwargs):
+#     return create_deit("tiny", **kwargs)
+
+# def deit_small(**kwargs):
+#     return create_deit("small", **kwargs)
+
+# def deit_base(**kwargs):
+#     return create_deit("base", **kwargs)
+
+
+def deit_tiny(main_config, **kwargs):
+    """DeiT-Tiny - takes main config"""
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits=bits
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
-    config.quantize_classifier = quantize_classifier
+    config.quantize_classifier = False
     
-    # Merge configs
-    model_config = configs[variant]
-    model_config.update(kwargs)
+    return DeiT(
+        embed_dim=192, depth=12, num_heads=3,  # tiny config hardcoded
+        config=config,
+        num_classes=main_config.model.num_classes,
+        img_size=main_config.model.img_size,
+        **kwargs
+    )
+
+def deit_small(main_config, **kwargs):
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
     
-    return DeiT(config=config, teacher_model=teacher_model, **model_config)
-
-
-# Convenient factory functions
-def deit_tiny(**kwargs):
-    return create_deit("tiny", **kwargs)
-
-def deit_small(**kwargs):
-    return create_deit("small", **kwargs)
-
-def deit_base(**kwargs):
-    return create_deit("base", **kwargs)
+    return DeiT(
+        embed_dim=384, depth=12, num_heads=6,  # tiny config hardcoded
+        config=config,
+        num_classes=main_config.model.num_classes,
+        img_size=main_config.model.img_size,
+        **kwargs
+    )
+    
+def deit_base(main_config, **kwargs):
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return DeiT(
+        embed_dim=768, depth=12, num_heads=12,  # tiny config hardcoded
+        config=config,
+        num_classes=main_config.model.num_classes,
+        img_size=main_config.model.img_size,
+        **kwargs
+    )

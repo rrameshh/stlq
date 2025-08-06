@@ -290,48 +290,70 @@ class UnifiedMobileNetV2(nn.Module):
         return x
 
 
-# Factory functions
-def create_mobilenet(
-    version: str,
-    quantization_method: str = "linear",
-    **kwargs
-) -> Union[UnifiedMobileNetV1, UnifiedMobileNetV2]:
-    """
-    Factory function to create a unified MobileNet with specified quantization method.
+# # Factory functions
+# def create_mobilenet(
+#     version: str,
+#     quantization_method: str = "linear",
+#     **kwargs
+# ) -> Union[UnifiedMobileNetV1, UnifiedMobileNetV2]:
+#     """
+#     Factory function to create a unified MobileNet with specified quantization method.
     
-    Args:
-        version: 'v1' or 'v2'
-        quantization_method: 'linear' or 'log'
-        **kwargs: Additional arguments (num_classes, device, etc.)
-    """
-    # Extract config-specific parameters
-    device = kwargs.pop('device', None)
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
+#     Args:
+#         version: 'v1' or 'v2'
+#         quantization_method: 'linear' or 'log'
+#         **kwargs: Additional arguments (num_classes, device, etc.)
+#     """
+#     # Extract config-specific parameters
+#     device = kwargs.pop('device', None)
+#     threshold = kwargs.pop('threshold', 1e-5)
+#     momentum = kwargs.pop('momentum', 0.1)
+#     bits = kwargs.pop('bits', 8)
     
-    # Create config based on method
+#     # Create config based on method
+#     config = QuantizationConfig(
+#         method=quantization_method,
+#         momentum=momentum,
+#         device=device,
+#         threshold=threshold,
+#         bits=bits
+#     )
+    
+#     if version.lower() == 'v1':
+#         return UnifiedMobileNetV1(config=config, **kwargs)
+#     elif version.lower() == 'v2':
+#         return UnifiedMobileNetV2(config=config, **kwargs)
+#     else:
+#         raise ValueError(f"Unknown MobileNet version: {version}")
+
+
+# def mobilenetv1(quantization_method="linear", **kwargs):
+#     """MobileNetV1 with unified quantization"""
+#     return create_mobilenet('v1', quantization_method, **kwargs)
+
+
+# def mobilenetv2(quantization_method="linear", **kwargs):
+#     """MobileNetV2 with unified quantization"""
+#     return create_mobilenet('v2', quantization_method, **kwargs)
+    
+def mobilenetv1(main_config, **kwargs):
+    """MobileNetV1 - takes main config"""
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits=bits
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
-    
-    if version.lower() == 'v1':
-        return UnifiedMobileNetV1(config=config, **kwargs)
-    elif version.lower() == 'v2':
-        return UnifiedMobileNetV2(config=config, **kwargs)
-    else:
-        raise ValueError(f"Unknown MobileNet version: {version}")
+    return UnifiedMobileNetV1(config=config, num_classes=main_config.model.num_classes, **kwargs)
 
-
-def mobilenetv1(quantization_method="linear", **kwargs):
-    """MobileNetV1 with unified quantization"""
-    return create_mobilenet('v1', quantization_method, **kwargs)
-
-
-def mobilenetv2(quantization_method="linear", **kwargs):
-    """MobileNetV2 with unified quantization"""
-    return create_mobilenet('v2', quantization_method, **kwargs)
+def mobilenetv2(main_config, **kwargs):
+    """MobileNetV2 - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    return UnifiedMobileNetV2(config=config, num_classes=main_config.model.num_classes, **kwargs)

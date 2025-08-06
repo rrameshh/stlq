@@ -480,81 +480,147 @@ class SwinTransformer(nn.Module):
         
         return x
     
-def create_swin_transformer(variant="tiny", quantization_method="linear", **kwargs):
-    """Create Swin Transformer variants with PROTECTED configurations"""
+# def create_swin_transformer(variant="tiny", quantization_method="linear", **kwargs):
+#     """Create Swin Transformer variants with PROTECTED configurations"""
     
-    configs = {
-        "tiny": {
-            "embed_dim": 96, 
-            "depths": [2, 2, 6, 2], 
-            "num_heads": [3, 6, 12, 24],
-            "window_size": 7
-        },
-        "small": {
-            "embed_dim": 96, 
-            "depths": [2, 2, 18, 2], 
-            "num_heads": [3, 6, 12, 24],
-            "window_size": 7
-        },
-        "base": {
-            "embed_dim": 128, 
-            "depths": [2, 2, 18, 2], 
-            "num_heads": [4, 8, 16, 32],
-            "window_size": 7
-        },
-    }
+#     configs = {
+#         "tiny": {
+#             "embed_dim": 96, 
+#             "depths": [2, 2, 6, 2], 
+#             "num_heads": [3, 6, 12, 24],
+#             "window_size": 7
+#         },
+#         "small": {
+#             "embed_dim": 96, 
+#             "depths": [2, 2, 18, 2], 
+#             "num_heads": [3, 6, 12, 24],
+#             "window_size": 7
+#         },
+#         "base": {
+#             "embed_dim": 128, 
+#             "depths": [2, 2, 18, 2], 
+#             "num_heads": [4, 8, 16, 32],
+#             "window_size": 7
+#         },
+#     }
     
-    if variant not in configs:
-        raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
+#     if variant not in configs:
+#         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
     
-    # Extract config parameters
-    device = kwargs.pop('device', 'cuda:0')
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
-    quantize_classifier = kwargs.pop('quantize_classifier', False)
+#     # Extract config parameters
+#     device = kwargs.pop('device', 'cuda:0')
+#     threshold = kwargs.pop('threshold', 1e-5)
+#     momentum = kwargs.pop('momentum', 0.1)
+#     bits = kwargs.pop('bits', 8)
+#     quantize_classifier = kwargs.pop('quantize_classifier', False)
     
-    # Handle img_size properly
-    img_size = kwargs.get('img_size', 224)
-    print(f"Swin factory: img_size={img_size} from kwargs={kwargs.get('img_size')}")
+#     # Handle img_size properly
+#     img_size = kwargs.get('img_size', 224)
+#     print(f"Swin factory: img_size={img_size} from kwargs={kwargs.get('img_size')}")
     
-    from quantization.quant_config import QuantizationConfig
+#     from quantization.quant_config import QuantizationConfig
+#     config = QuantizationConfig(
+#         method=quantization_method,
+#         momentum=momentum,
+#         device=device,
+#         threshold=threshold,
+#         bits=bits
+#     )
+#     config.quantize_classifier = quantize_classifier
+    
+#     model_config = configs[variant].copy()  # Make a copy first
+    
+#     # Only allow safe parameters to be overridden
+#     safe_kwargs = {
+#         'img_size': kwargs.get('img_size', 224),
+#         'patch_size': kwargs.get('patch_size', 4),
+#         'in_chans': kwargs.get('in_chans', 3),
+#         'num_classes': kwargs.get('num_classes', 1000),
+#         'drop_rate': kwargs.get('drop_rate', 0.0),
+#         'attn_drop_rate': kwargs.get('attn_drop_rate', 0.0),
+#         'mlp_ratio': kwargs.get('mlp_ratio', 4.0),
+#         'qkv_bias': kwargs.get('qkv_bias', True)
+#     }
+    
+#     # Update with only safe parameters
+#     model_config.update(safe_kwargs)
+    
+#     print(f"Final Swin config: depths={model_config['depths']}, num_heads={model_config['num_heads']}")
+    
+#     return SwinTransformer(config=config, **model_config)
+
+
+# def swin_tiny(quantization_method="linear", **kwargs):
+#     return create_swin_transformer("tiny", quantization_method, **kwargs)
+
+# def swin_small(quantization_method="linear", **kwargs):
+#     return create_swin_transformer("small", quantization_method, **kwargs)
+
+# def swin_base(quantization_method="linear", **kwargs):
+#     return create_swin_transformer("base", quantization_method, **kwargs)
+    
+def swin_tiny(main_config, **kwargs):
+    """Swin-Tiny - takes main config"""
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits=bits
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
-    config.quantize_classifier = quantize_classifier
+    config.quantize_classifier = False
     
-    model_config = configs[variant].copy()  # Make a copy first
-    
-    # Only allow safe parameters to be overridden
-    safe_kwargs = {
-        'img_size': kwargs.get('img_size', 224),
-        'patch_size': kwargs.get('patch_size', 4),
-        'in_chans': kwargs.get('in_chans', 3),
-        'num_classes': kwargs.get('num_classes', 1000),
-        'drop_rate': kwargs.get('drop_rate', 0.0),
-        'attn_drop_rate': kwargs.get('attn_drop_rate', 0.0),
-        'mlp_ratio': kwargs.get('mlp_ratio', 4.0),
-        'qkv_bias': kwargs.get('qkv_bias', True)
-    }
-    
-    # Update with only safe parameters
-    model_config.update(safe_kwargs)
-    
-    print(f"Final Swin config: depths={model_config['depths']}, num_heads={model_config['num_heads']}")
-    
-    return SwinTransformer(config=config, **model_config)
+    return SwinTransformer(
+        embed_dim=96,
+        depths=[2, 2, 6, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        config=config,
+        num_classes=main_config.model.num_classes,
+        img_size=main_config.model.img_size,
+        **kwargs
+    )
 
+def swin_small(main_config, **kwargs):
+    """Swin-Small - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return SwinTransformer(
+        embed_dim=96,
+        depths=[2, 2, 18, 2],  # Different from tiny
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        config=config,
+        num_classes=main_config.model.num_classes,
+        img_size=main_config.model.img_size,
+        **kwargs
+    )
 
-def swin_tiny(quantization_method="linear", **kwargs):
-    return create_swin_transformer("tiny", quantization_method, **kwargs)
-
-def swin_small(quantization_method="linear", **kwargs):
-    return create_swin_transformer("small", quantization_method, **kwargs)
-
-def swin_base(quantization_method="linear", **kwargs):
-    return create_swin_transformer("base", quantization_method, **kwargs)
+def swin_base(main_config, **kwargs):
+    """Swin-Base - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return SwinTransformer(
+        embed_dim=128,  # Different from tiny/small
+        depths=[2, 2, 18, 2],
+        num_heads=[4, 8, 16, 32],  # Different from tiny/small
+        window_size=7,
+        config=config,
+        num_classes=main_config.model.num_classes,
+        img_size=main_config.model.img_size,
+        **kwargs
+    )

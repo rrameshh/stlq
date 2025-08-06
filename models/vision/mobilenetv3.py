@@ -326,43 +326,77 @@ class MobileNetV3(nn.Module):
         return x
 
 
-# Factory functions
-def create_mobilenetv3(
-    variant: str,
-    quantization_method: str = "linear",
-    **kwargs
-) -> MobileNetV3:
-    """
-    Factory function to create a unified MobileNetV3 with specified quantization method.
+# # Factory functions
+# def create_mobilenetv3(
+#     variant: str,
+#     quantization_method: str = "linear",
+#     **kwargs
+# ) -> MobileNetV3:
+#     """
+#     Factory function to create a unified MobileNetV3 with specified quantization method.
     
-    Args:
-        variant: 'large' or 'small'
-        quantization_method: 'linear' or 'log'
-        **kwargs: Additional arguments (num_classes, device, etc.)
-    """
-    # Extract config-specific parameters
-    device = kwargs.pop('device', None)
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
+#     Args:
+#         variant: 'large' or 'small'
+#         quantization_method: 'linear' or 'log'
+#         **kwargs: Additional arguments (num_classes, device, etc.)
+#     """
+#     # Extract config-specific parameters
+#     device = kwargs.pop('device', None)
+#     threshold = kwargs.pop('threshold', 1e-5)
+#     momentum = kwargs.pop('momentum', 0.1)
+#     bits = kwargs.pop('bits', 8)
     
-    # Create config based on method
+#     # Create config based on method
+#     config = QuantizationConfig(
+#         method=quantization_method,
+#         momentum=momentum,
+#         device=device,
+#         threshold=threshold,
+#         bits=bits
+#     )
+    
+#     return MobileNetV3(config=config, variant=variant, **kwargs)
+
+
+# def mobilenetv3_large(quantization_method="linear", **kwargs):
+#     """MobileNetV3-Large with unified quantization"""
+#     return create_mobilenetv3('large', quantization_method, **kwargs)
+
+
+# def mobilenetv3_small(quantization_method="linear", **kwargs):
+#     """MobileNetV3-Small with unified quantization"""
+#     return create_mobilenetv3('small', quantization_method, **kwargs)
+
+def mobilenetv3_large(main_config, **kwargs):
+    """MobileNetV3-Large - takes main config"""
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits=bits
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
     
-    return MobileNetV3(config=config, variant=variant, **kwargs)
+    return MobileNetV3(
+        config=config, 
+        variant='large',
+        num_classes=main_config.model.num_classes,
+        **kwargs
+    )
 
-
-def mobilenetv3_large(quantization_method="linear", **kwargs):
-    """MobileNetV3-Large with unified quantization"""
-    return create_mobilenetv3('large', quantization_method, **kwargs)
-
-
-def mobilenetv3_small(quantization_method="linear", **kwargs):
-    """MobileNetV3-Small with unified quantization"""
-    return create_mobilenetv3('small', quantization_method, **kwargs)
+def mobilenetv3_small(main_config, **kwargs):
+    """MobileNetV3-Small - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    
+    return MobileNetV3(
+        config=config, 
+        variant='small',
+        num_classes=main_config.model.num_classes,
+        **kwargs
+    )

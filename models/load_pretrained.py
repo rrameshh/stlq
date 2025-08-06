@@ -365,12 +365,6 @@ def load_pretrained_resnet(model, variant="18", num_classes=100):
     elif variant == "50":
         pretrained_model = models.resnet50(pretrained=True)
         print("Loading ResNet-50 pretrained weights...")
-    elif variant == "34":
-        pretrained_model = models.resnet34(pretrained=True)
-        print("Loading ResNet-34 pretrained weights...")
-    elif variant == "101":
-        pretrained_model = models.resnet101(pretrained=True)
-        print("Loading ResNet-101 pretrained weights...")
     else:
         raise ValueError(f"Unsupported ResNet variant: {variant}")
     
@@ -388,20 +382,13 @@ def _create_resnet_mapping(custom_dict, num_classes, variant="18"):
         'bn1.num_batches_tracked': 'conv1.bn2d.num_batches_tracked',
     }
     
-    # Determine the number of blocks per layer based on variant
-    if variant in ["18", "34"]:
-        # BasicBlock architectures
-        layer_blocks = [2, 2, 2, 2]  # ResNet-18/34
-        num_convs = 2  # BasicBlock has 2 convs
-    elif variant in ["50", "101", "152"]:
-        # Bottleneck architectures  
-        if variant == "50":
-            layer_blocks = [3, 4, 6, 3]  # ResNet-50
-        elif variant == "101":
-            layer_blocks = [3, 4, 23, 3]  # ResNet-101
-        else:  # variant == "152"
-            layer_blocks = [3, 8, 36, 3]  # ResNet-152
-        num_convs = 3  # Bottleneck has 3 convs
+    if variant == '18':
+        layer_blocks = [2, 2, 2, 2]  
+        num_convs = 2 
+    elif variant == '50':
+        layer_blocks = [3, 4, 6, 3]  
+        num_convs = 3
+
     else:
         raise ValueError(f"Unknown ResNet variant: {variant}")
     
@@ -456,12 +443,6 @@ def load_pretrained_resnet(model, variant="18", num_classes=100):
     elif variant == "50":
         pretrained_model = models.resnet50(pretrained=True)
         print("Loading ResNet-50 pretrained weights...")
-    elif variant == "34":
-        pretrained_model = models.resnet34(pretrained=True)
-        print("Loading ResNet-34 pretrained weights...")
-    elif variant == "101":
-        pretrained_model = models.resnet101(pretrained=True)
-        print("Loading ResNet-101 pretrained weights...")
     else:
         raise ValueError(f"Unsupported ResNet variant: {variant}")
     

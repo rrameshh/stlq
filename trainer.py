@@ -1,4 +1,4 @@
-# trainer.py - SIMPLEST possible version, no registry
+# trainer.py - Updated to use simplified registry
 
 import torch
 import torch.optim as optim
@@ -12,8 +12,12 @@ from quantization.hooks import create_switch_hook
 from utils.training import train_epoch, validate, save_checkpoint
 from utils.quantization_metrics import log_quantization_stats_to_tensorboard
 
+# Import the simplified registry
+from models import create_model
+from models.pretrained import load_pretrained_weights
+
 class Trainer:
-    """Super simple trainer - direct model imports."""
+    """Simplified trainer using the new registry system."""
     
     def __init__(self, config: Config):
         self.config = config
@@ -38,47 +42,24 @@ class Trainer:
         self.best_metric = 0.0
         self.patience_counter = 0
         
-        print(f"📊 Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-        print(f"🔧 Switch iteration: {config.quantization.switch_iteration}")
+        print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        print(f"Switch iteration: {config.quantization.switch_iteration}")
     
     def _create_model(self):
-        """Create model - direct import, no registry."""
+        """Create model using the simplified registry."""
         model_name = self.config.model.name.lower()
         
-        # Import and create model directly based on name
-        if model_name == "resnet18":
-            from models.vision.cnn.resnet import resnet18
-            model = resnet18(
-                quantization_method=self.config.quantization.method,
+        # Use the simplified registry
+        model = create_model(model_name, self.config)
+        
+        # Load pretrained weights if requested
+        if self.config.model.pretrained:
+            model = load_pretrained_weights(
+                model, 
+                model_name,
                 num_classes=self.config.model.num_classes,
-                device=self.device,
-                momentum=self.config.quantization.momentum,
-                threshold=self.config.quantization.threshold,
-                bits=self.config.quantization.bits,
+                img_size=getattr(self.config.model, 'img_size', 224)
             )
-        elif model_name == "resnet50":
-            from models.vision.cnn.resnet import resnet50
-            model = resnet50(
-                quantization_method=self.config.quantization.method,
-                num_classes=self.config.model.num_classes,
-                device=self.device,
-                momentum=self.config.quantization.momentum,
-                threshold=self.config.quantization.threshold,
-                bits=self.config.quantization.bits,
-            )
-        elif "vit" in model_name:
-            from models.vision.transformer.vit import industry_vit_small
-            model = industry_vit_small(
-                quantization_method=self.config.quantization.method,
-                num_classes=self.config.model.num_classes,
-                img_size=self.config.model.img_size,  # VIT needs img_size
-                device=self.device,
-                momentum=self.config.quantization.momentum,
-                threshold=self.config.quantization.threshold,
-                bits=self.config.quantization.bits,
-            )
-        else:
-            raise ValueError(f"Model {model_name} not implemented in simple trainer")
         
         # Move to device and store reference
         model = model.to(self.device)
@@ -86,8 +67,8 @@ class Trainer:
         return model
     
     def train(self) -> float:
-        """Main training loop."""
-        print("🚀 Starting training...")
+        """Main training loop - unchanged from your original."""
+        print("Starting training...")
         
         for epoch in range(self.config.training.num_epochs):
             start_time = time.time()
@@ -135,6 +116,6 @@ class Trainer:
                 print(f"Early stopping after {epoch+1} epochs")
                 break
         
-        print(f"🎉 Training completed! Best accuracy: {self.best_metric:.2f}%")
+        print(f"Training completed! Best accuracy: {self.best_metric:.2f}%")
         self.writer.close()
         return self.best_metric
