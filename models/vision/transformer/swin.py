@@ -6,7 +6,7 @@ from typing import Tuple
 import math
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QLinear,
 )
 from quantization.quant_config import QuantizationConfig
@@ -96,7 +96,7 @@ class WindowAttention(nn.Module):
             
         self.qkv = QLinear(dim, dim * 3, bias=qkv_bias, config=config)
         self.proj = QLinear(dim, dim, config=config)
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
         
         # Relative position bias with proper window size handling
         self.relative_position_bias_table = nn.Parameter(
@@ -449,7 +449,7 @@ class SwinTransformer(nn.Module):
             quantize_classifier = getattr(config, 'quantize_classifier', False)
             if quantize_classifier:
                 self.head = QLinear(final_dim, num_classes, config=config)
-                self.head_quantizer = Quantizer(config=config)
+                self.head_quantizer = Quantize(config=config)
             else:
                 self.head = nn.Linear(final_dim, num_classes) if num_classes > 0 else nn.Identity()
         

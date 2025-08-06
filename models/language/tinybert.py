@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 import math
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QLinear,
 )
 from quantization.quant_config import QuantizationConfig
@@ -81,7 +81,7 @@ class BERTAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
     
     def forward(self, hidden_states, attention_mask=None):
         """
@@ -157,7 +157,7 @@ class BERTMLP(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
     
     def forward(self, hidden_states):
         """Same flow as your ViT/TinyGPT MLP"""
@@ -251,7 +251,7 @@ class BERTPooler(nn.Module):
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.dense = QLinear(hidden_size, hidden_size, config=config)
-            self.pooler_quantizer = Quantizer(config=config)
+            self.pooler_quantizer = Quantize(config=config)
         else:
             # Industry standard: Keep pooler in FP32
             self.dense = nn.Linear(hidden_size, hidden_size)
@@ -314,7 +314,7 @@ class TinyBERT(nn.Module):
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.classifier = QLinear(hidden_size, num_classes, config=config)
-            self.classifier_quantizer = Quantizer(config=config)
+            self.classifier_quantizer = Quantize(config=config)
         else:
             # Industry standard: Keep classifier in FP32
             self.classifier = nn.Linear(hidden_size, num_classes) if num_classes > 0 else nn.Identity()

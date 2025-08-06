@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QConv2dBNRelu, 
     QLinear,
     QAdd,
@@ -150,7 +150,7 @@ class ResNet(nn.Module):
             )
 
         # All layers use the same config - this is the key to unified approach!
-        self.quantize = Quantizer(config=config)
+        self.quantize = Quantize(config=config)
         self.conv1 = QConv2dBNRelu(
             3, self.inplanes, kernel_size=7, stride=2, padding=3, 
             bias=False, activation="relu", config=config

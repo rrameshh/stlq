@@ -4,7 +4,7 @@ import torch.nn as nn
 from typing import Optional, List, Union
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QConv2dBNRelu, 
     QLinear,
     QAdd,
@@ -122,7 +122,7 @@ class UnifiedMobileNetV1(nn.Module):
         
         input_channel = _make_divisible(32 * width_multiplier)
         
-        self.quantize = Quantizer(config=config)
+        self.quantize = Quantize(config=config)
         
         # First conv layer
         self.features = nn.ModuleList([
@@ -210,7 +210,7 @@ class UnifiedMobileNetV2(nn.Module):
         input_channel = _make_divisible(32 * width_multiplier)
         last_channel = _make_divisible(1280 * max(1.0, width_multiplier))
         
-        self.quantize = Quantizer(config=config)
+        self.quantize = Quantize(config=config)
         
         # First conv layer
         self.features = nn.ModuleList([

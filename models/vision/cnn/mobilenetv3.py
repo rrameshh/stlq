@@ -6,7 +6,7 @@ from typing import Optional, List, Union
 import math
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QConv2dBNRelu, 
     QLinear,
     QAdd,
@@ -44,7 +44,7 @@ class SEModule(nn.Module):
         self.hardsigmoid = nn.Hardsigmoid(inplace=True)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
         
     def forward(self, x):
         """
@@ -201,7 +201,7 @@ class MobileNetV3(nn.Module):
         
         # First conv layer
         input_channel = _make_divisible(16 * width_multiplier)
-        self.quantize = Quantizer(config=config)
+        self.quantize = Quantize(config=config)
         
         self.features = nn.ModuleList([
             UnifiedQuantizedConvBatchNormUnfused(

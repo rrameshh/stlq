@@ -6,7 +6,7 @@ from typing import Optional
 import math
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QLinear,
 )
 from quantization.quant_config import QuantizationConfig
@@ -33,7 +33,7 @@ class GPTAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
         
         # Causal mask (will be registered as buffer)
         self.register_buffer("causal_mask", None)
@@ -119,7 +119,7 @@ class GPTMLP(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
         # Input quantizer
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
     
     def forward(self, x):
         """Same flow as your ViT MLP"""
@@ -223,7 +223,7 @@ class TinyGPT(nn.Module):
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.lm_head = QLinear(dim, vocab_size, config=config)
-            self.head_quantizer = Quantizer(config=config)
+            self.head_quantizer = Quantize(config=config)
         else:
             # Tie weights with token embedding (standard practice)
             self.lm_head = nn.Linear(dim, vocab_size, bias=False)

@@ -6,7 +6,7 @@ from typing import Optional
 import math
 
 from quantization.layers.all import (
-    Quantizer,
+    Quantize,
     QLinear,
 )
 from quantization.quant_config import QuantizationConfig
@@ -69,7 +69,7 @@ class SelectiveQuantizedMultiHeadAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         
         # Input quantizer for explicit transition management
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
     
     def forward(self, x):
         """
@@ -155,7 +155,7 @@ class SelectiveQuantizedMLP(nn.Module):
         self.drop = nn.Dropout(drop)
         
         # Input quantizer
-        self.input_quantizer = Quantizer(config=config)
+        self.input_quantizer = Quantize(config=config)
     
     def forward(self, x):
         """
@@ -329,7 +329,7 @@ class ViT(nn.Module):
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.head = QLinear(embed_dim, num_classes, config=config)
-            self.head_quantizer = Quantizer(config=config)
+            self.head_quantizer = Quantize(config=config)
         else:
             # Industry standard: Keep classifier in FP32
             self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -392,7 +392,7 @@ class ViT(nn.Module):
         
         if hasattr(self, 'head_quantizer'):
             # Quantized classifier path
-            cls_quantized = self.head_quantizer(cls_token)
+            cls_quantized = self.head_quantize(cls_token)
             
             x = self.head(cls_quantized)
             
