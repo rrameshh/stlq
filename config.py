@@ -1,34 +1,57 @@
-# config.py - Missing from your refactored code
+# config.py - Enhanced with validation and defaults
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 import yaml
 from pathlib import Path
 import torch
 
 @dataclass
 class DataConfig:
-    dataset: str = "cifar10"  # cifar10, imagenet100, shakespeare, imdb, sst2
+    dataset: str = "cifar10"
     batch_size: int = 128
     num_workers: int = 4
     seq_len: int = 128  # For language models
     
+    def __post_init__(self):
+        valid_datasets = ["cifar10", "imagenet100", "shakespeare", "imdb", "sst2"]
+        if self.dataset not in valid_datasets:
+            raise ValueError(f"Invalid dataset '{self.dataset}'. Valid: {valid_datasets}")
+
 @dataclass 
 class ModelConfig:
-    name: str = "resnet18"  # resnet18, vit_small, etc.
+    name: str = "resnet18"
     num_classes: int = 10
     img_size: int = 224
-    vocab_size: Optional[int] = None  # Set by dataset for language models
+    vocab_size: Optional[int] = None
     pretrained: bool = False
     
+    def __post_init__(self):
+        # Auto-set num_classes based on dataset
+        if hasattr(self, '_dataset'):
+            dataset_classes = {
+                "cifar10": 10,
+                "imagenet100": 100,
+                "imdb": 2,
+                "sst2": 2
+            }
+            if self._dataset in dataset_classes:
+                self.num_classes = dataset_classes[self._dataset]
+
 @dataclass
 class QuantizationConfig:
-    method: str = "linear"  # linear, log
+    method: str = "linear"
     momentum: float = 0.1
     bits: int = 8
-    threshold: float = 1e-5  # For log quantization
+    threshold: float = 1e-5
     eps: float = 1e-8
-    switch_iteration: int = 5000  # When to enable activation quantization
+    switch_iteration: int = 5000
     
+    def __post_init__(self):
+        if self.method not in ["linear", "log"]:
+            raise ValueError(f"Invalid quantization method '{self.method}'. Valid: ['linear', 'log']")
+        if self.bits not in [4, 8, 16]:
+            print(f"Warning: Unusual bit width {self.bits}. Common values: [4, 8, 16]")
+
 @dataclass
 class TrainingConfig:
     num_epochs: int = 200
@@ -39,48 +62,63 @@ class TrainingConfig:
     
 @dataclass
 class SystemConfig:
-    device: str = "cuda:0"
+    device: str = field(default_factory=lambda: "cuda:0" if torch.cuda.is_available() else "cpu")
     work_dir: str = "./output"
     seed: int = 42
     
 @dataclass 
 class Config:
-    """Main configuration class."""
+    """Main configuration with auto-validation and smart defaults."""
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
     
+    def __post_init__(self):
+        """Auto-adjust related settings."""
+        # Link dataset to model for auto num_classes
+        self.model._dataset = self.data.dataset
+        self.model.__post_init__()
+        
+        # Auto-adjust work_dir based on quantization method
+        if self.system.work_dir == "./output":
+            self.system.work_dir = f"./output_{self.quantization.method}"
+        
+        # Validate device
+        if "cuda" in self.system.device and not torch.cuda.is_available():
+            print(f"Warning: CUDA not available, switching to CPU")
+            self.system.device = "cpu"
+    
     @classmethod
     def from_yaml(cls, path: str) -> 'Config':
-        """Load config from YAML file."""
+        """Load and validate config from YAML."""
         with open(path, 'r') as f:
             data = yaml.safe_load(f)
         
-        # Create config objects
         config = cls()
         
-        if 'data' in data:
-            config.data = DataConfig(**data['data'])
-        if 'model' in data:
-            config.model = ModelConfig(**data['model'])
-        if 'quantization' in data:
-            config.quantization = QuantizationConfig(**data['quantization'])
-        if 'training' in data:
-            config.training = TrainingConfig(**data['training'])
-        if 'system' in data:
-            config.system = SystemConfig(**data['system'])
-            
+        # Update each section
+        for section_name in ['data', 'model', 'quantization', 'training', 'system']:
+            if section_name in data:
+                section = getattr(config, section_name)
+                for key, value in data[section_name].items():
+                    if hasattr(section, key):
+                        setattr(section, key, value)
+                    else:
+                        print(f"Warning: Unknown config key '{section_name}.{key}' ignored")
+        
+        # Re-run post-init for validation
+        config.__post_init__()
         return config
     
     def save_yaml(self, path: Path):
-        """Save config to YAML file."""
+        """Save config to YAML."""
         path.parent.mkdir(parents=True, exist_ok=True)
         
         data = {
             'data': self.data.__dict__,
-            'model': self.model.__dict__,
+            'model': {k: v for k, v in self.model.__dict__.items() if not k.startswith('_')},
             'quantization': self.quantization.__dict__,
             'training': self.training.__dict__,
             'system': self.system.__dict__,
@@ -89,44 +127,15 @@ class Config:
         with open(path, 'w') as f:
             yaml.dump(data, f, default_flow_style=False)
     
-    def apply_overrides(self, overrides: List[str]):
-        """Apply command line overrides (key=value format)."""
-        for override in overrides:
-            if '=' not in override:
-                continue
-                
-            key, value = override.split('=', 1)
-            keys = key.split('.')
-            
-            # Parse value
-            if value.lower() == 'true':
-                value = True
-            elif value.lower() == 'false':
-                value = False
-            elif value.isdigit():
-                value = int(value)
-            elif value.replace('.', '').isdigit():
-                value = float(value)
-            
-            # Apply override
-            obj = self
-            for k in keys[:-1]:
-                obj = getattr(obj, k)
-            setattr(obj, keys[-1], value)
-    
     def print_summary(self):
-        """Print config summary."""
+        """Print clean config summary."""
         print("=" * 60)
         print("CONFIGURATION SUMMARY")
         print("=" * 60)
-        print(f"Dataset: {self.data.dataset}")
-        print(f"Model: {self.model.name}")
-        print(f"Quantization: {self.quantization.method}")
-        print(f"Batch size: {self.data.batch_size}")
-        print(f"Learning rate: {self.training.lr}")
+        print(f"Dataset: {self.data.dataset} (classes: {self.model.num_classes})")
+        print(f"Model: {self.model.name} {'(pretrained)' if self.model.pretrained else ''}")
+        print(f"Quantization: {self.quantization.method} ({self.quantization.bits}-bit)")
+        print(f"Training: {self.training.num_epochs} epochs @ LR {self.training.lr}")
         print(f"Device: {self.system.device}")
-        print(f"Work dir: {self.system.work_dir}")
+        print(f"Output: {self.system.work_dir}")
         print("=" * 60)
-
-
-        

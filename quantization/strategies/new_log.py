@@ -20,8 +20,6 @@ class LogStrategy(QuantizationStrategy):
         6. Optionally compute secondary quantization (q2) if error > threshold
         """
 
-
-
         
 
         config = self.config  # Assuming config has threshold, eps, max_value, etc.

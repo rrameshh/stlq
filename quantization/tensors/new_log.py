@@ -1,4 +1,4 @@
-# ops/tensors/new_log.py
+# quantization/tensors/new_log.py
 import torch
 from typing import Optional
 from .base import QuantizedTensorBase
