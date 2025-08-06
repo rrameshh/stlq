@@ -1,11 +1,10 @@
-# networks/language/tinygpt.py - Tiny GPT with Unified Quantization
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 import math
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QLinear,
 )
@@ -25,21 +24,15 @@ class GPTAttention(nn.Module):
         self.scale = self.head_dim ** -0.5
         self.config = config
         
-        # QUANTIZED: Heavy compute linear layers (like your ViT)
         self.qkv = QLinear(dim, dim * 3, bias=True, config=config)
         self.proj = QLinear(dim, dim, bias=True, config=config)
-        
-        # FP32: Lightweight operations
+
         self.dropout = nn.Dropout(dropout)
-        
-        # Input quantizer for explicit transition management
         self.input_quantizer = Quantize(config=config)
-        
-        # Causal mask (will be registered as buffer)
         self.register_buffer("causal_mask", None)
     
     def _get_causal_mask(self, seq_len, device):
-        """Get or create causal mask"""
+
         if self.causal_mask is None or self.causal_mask.size(0) < seq_len:
             # Create causal mask: upper triangular matrix of -inf
             mask = torch.triu(torch.full((seq_len, seq_len), float('-inf')), diagonal=1)
@@ -47,46 +40,34 @@ class GPTAttention(nn.Module):
         return self.causal_mask[:seq_len, :seq_len]
     
     def forward(self, x):
-        """
-        Causal self-attention forward pass
-        Similar flow to your ViT attention but with causal masking
-        """
+
         B, T, C = x.shape  # batch, sequence length, channels
         
-        # ============ EXPLICIT TRANSITION 1: FP32 → INT8 ============
         assert isinstance(x, torch.Tensor) and not isinstance(x, LinearQuantizedTensor), \
             "Expected FP32 input from LayerNorm"
         
-        # Quantize input for heavy compute
+
         x_quantized = self.input_quantizer(x)
-        
-        # ============ QUANTIZED COMPUTE: QKV PROJECTION ============
         qkv_quantized = self.qkv(x_quantized)
-        
-        # ============ EXPLICIT TRANSITION 2: INT8 → FP32 ============
+
         if isinstance(qkv_quantized, LinearQuantizedTensor):
             qkv_fp32 = qkv_quantized.dequantize()
         else:
             qkv_fp32 = qkv_quantized
         
-        # ============ FP32 COMPUTE: CAUSAL ATTENTION ============
         qkv_reshaped = qkv_fp32.reshape(B, T, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv_reshaped[0], qkv_reshaped[1], qkv_reshaped[2]
         
-        # Attention computation with causal masking
         attn_scores = (q @ k.transpose(-2, -1)) * self.scale  # [B, num_heads, T, T]
-        
-        # Apply causal mask
+    
         causal_mask = self._get_causal_mask(T, x.device)
         attn_scores = attn_scores + causal_mask
-        
         attn_weights = F.softmax(attn_scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
         
         out = attn_weights @ v  # [B, num_heads, T, head_dim]
         out = out.transpose(1, 2).reshape(B, T, C)  # [B, T, C]
         
-        # ============ EXPLICIT TRANSITION 3: FP32 → INT8 → FP32 ============
         out_quantized = self.input_quantizer(out)
         out_proj_quantized = self.proj(out_quantized)
         
@@ -109,12 +90,11 @@ class GPTMLP(nn.Module):
         
         hidden_dim = dim * expansion_factor
         self.config = config
-        
-        # QUANTIZED: Heavy compute linear layers
+
         self.fc1 = QLinear(dim, hidden_dim, config=config)
         self.fc2 = QLinear(hidden_dim, dim, config=config)
         
-        # FP32: Activation and dropout
+
         self.act = nn.GELU()
         self.dropout = nn.Dropout(dropout)
         
@@ -122,7 +102,7 @@ class GPTMLP(nn.Module):
         self.input_quantizer = Quantize(config=config)
     
     def forward(self, x):
-        """Same flow as your ViT MLP"""
+
         # FP32 → INT8
         x_quantized = self.input_quantizer(x)
         
@@ -151,21 +131,15 @@ class GPTMLP(nn.Module):
 
 
 class GPTBlock(nn.Module):
-    """
-    GPT Transformer Block - similar to your ViT block
-    Uses pre-norm (like GPT-2) instead of post-norm
-    """
     
     def __init__(self, dim, num_heads, expansion_factor=4, dropout=0.1, config=None):
         super().__init__()
         
         self.config = config
-        
-        # FP32: LayerNorm (same as ViT)
+    
         self.ln1 = nn.LayerNorm(dim)
         self.ln2 = nn.LayerNorm(dim)
-        
-        # Quantized attention and MLP (same flow as ViT)
+
         self.attn = GPTAttention(dim, num_heads=num_heads, dropout=dropout, config=config)
         self.mlp = GPTMLP(dim, expansion_factor=expansion_factor, dropout=dropout, config=config)
     
@@ -189,11 +163,7 @@ class GPTBlock(nn.Module):
 
 
 class TinyGPT(nn.Module):
-    """
-    Tiny GPT model with unified quantization
-    Decoder-only transformer for language modeling
-    """
-    
+
     def __init__(self, vocab_size=50257, max_seq_len=1024, dim=384, depth=6,
                  num_heads=6, expansion_factor=4, dropout=0.1, config=None):
         super().__init__()
@@ -203,36 +173,31 @@ class TinyGPT(nn.Module):
         self.max_seq_len = max_seq_len
         self.dim = dim
 
-        print(f"🔍 TinyGPT DEBUG: Creating model with vocab_size={vocab_size}")
+        # print(f"TinyGPT DEBUG: Creating model with vocab_size={vocab_size}")
         
-        # ============ FP32 EMBEDDINGS (like ViT patch embedding) ============
         self.token_embedding = nn.Embedding(vocab_size, dim)
         self.position_embedding = nn.Embedding(max_seq_len, dim)
         self.dropout = nn.Dropout(dropout)
         
-        # ============ QUANTIZED TRANSFORMER BLOCKS ============
         self.blocks = nn.ModuleList([
             GPTBlock(dim, num_heads, expansion_factor, dropout, config)
             for _ in range(depth)
         ])
         
-        # ============ FP32 OUTPUT LAYERS ============
         self.ln_final = nn.LayerNorm(dim)
         
-        # Language modeling head
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.lm_head = QLinear(dim, vocab_size, config=config)
             self.head_quantizer = Quantize(config=config)
         else:
-            # Tie weights with token embedding (standard practice)
+            # Tie weights with token embedding
             self.lm_head = nn.Linear(dim, vocab_size, bias=False)
             self.lm_head.weight = self.token_embedding.weight
         
         self._init_weights()
     
     def _init_weights(self):
-        """Initialize weights following GPT-2 initialization"""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -258,7 +223,6 @@ class TinyGPT(nn.Module):
         B, T = input_ids.shape
         assert T <= self.max_seq_len, f"Sequence length {T} exceeds maximum {self.max_seq_len}"
         
-        # ============ FP32 EMBEDDING PHASE ============
         # Token and position embeddings
         token_emb = self.token_embedding(input_ids)  # [B, T, dim]
         pos_ids = torch.arange(0, T, dtype=torch.long, device=input_ids.device)
@@ -267,22 +231,17 @@ class TinyGPT(nn.Module):
         x = token_emb + pos_emb
         x = self.dropout(x)
         
-        # ============ QUANTIZED TRANSFORMER BLOCKS ============
         for block in self.blocks:
             x = block(x)
         
-        # ============ FP32 OUTPUT PHASE ============
         x = self.ln_final(x)
         
-        # Language modeling head
         if hasattr(self, 'head_quantizer'):
-            # Quantized head
             x_quantized = self.head_quantizer(x)
             logits = self.lm_head(x_quantized)
             if isinstance(logits, LinearQuantizedTensor):
                 logits = logits.dequantize()
         else:
-            # FP32 head (weight-tied)
             logits = self.lm_head(x)
         
         if targets is not None:
@@ -296,9 +255,7 @@ class TinyGPT(nn.Module):
         return logits
     
     def generate(self, input_ids, max_new_tokens=50, temperature=1.0, top_k=None):
-        """
-        Simple autoregressive generation
-        """
+
         self.eval()
         with torch.no_grad():
             for _ in range(max_new_tokens):
@@ -327,11 +284,9 @@ class TinyGPT(nn.Module):
         return input_ids
 
 
-# Factory functions
+
 def create_tiny_gpt(variant="nano", quantization_method="linear", **kwargs):
-    """
-    Create Tiny GPT variants
-    """
+
     
     configs = {
         "nano": {"dim": 192, "depth": 4, "num_heads": 3, "max_seq_len": 256},    # ~2M params
@@ -343,14 +298,12 @@ def create_tiny_gpt(variant="nano", quantization_method="linear", **kwargs):
     if variant not in configs:
         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
     
-    # Extract config parameters
     device = kwargs.pop('device', 'cuda:0')
     threshold = kwargs.pop('threshold', 1e-5)
     momentum = kwargs.pop('momentum', 0.1)
     bits = kwargs.pop('bits', 8)
     quantize_classifier = kwargs.pop('quantize_classifier', False)
     
-    # Create quantization config
     config = QuantizationConfig(
         method=quantization_method,
         momentum=momentum,
@@ -360,14 +313,12 @@ def create_tiny_gpt(variant="nano", quantization_method="linear", **kwargs):
     )
     config.quantize_classifier = quantize_classifier
     
-    # Merge configs
     model_config = configs[variant]
     model_config.update(kwargs)
     
     return TinyGPT(config=config, **model_config)
 
 
-# Convenient factory functions
 def tiny_gpt_nano(**kwargs):
     return create_tiny_gpt("nano", **kwargs)
 

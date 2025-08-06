@@ -1,16 +1,15 @@
-# # models/vision/cnn/resnet.py
 from typing import Optional, Type, List, Union, Any
 import torch
 import torch.nn as nn
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QConv2dBNRelu, 
     QLinear,
     QAdd,
     QRelu,
     QMaxPool2d,
-    UnifiedQuantizedAdaptiveAvgPool2d,
+    QAdaptiveAvgPool2d,
     QFlatten
 )
 from quantization.quant_config import QuantizationConfig
@@ -119,7 +118,6 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    """Single ResNet implementation that works with any quantization method"""
     
     def __init__(
         self,
@@ -149,7 +147,6 @@ class ResNet(nn.Module):
                 f"or a 3-element tuple, got {replace_stride_with_dilation}"
             )
 
-        # All layers use the same config - this is the key to unified approach!
         self.quantize = Quantize(config=config)
         self.conv1 = QConv2dBNRelu(
             3, self.inplanes, kernel_size=7, stride=2, padding=3, 
@@ -162,11 +159,11 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         
-        self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
+        self.avgpool = QAdaptiveAvgPool2d((1, 1), config=config)
         self.flatten = QFlatten(1, config=config)
         self.fc = QLinear(512 * block.expansion, num_classes, config=config)
 
-        # Standard initialization
+      
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
@@ -243,53 +240,6 @@ class ResNet(nn.Module):
 
         return x
 
-
-# # Factory functions
-# def create_resnet(
-#     block_type: Type[Union[BasicBlock, Bottleneck]],
-#     layers: List[int],
-#     quantization_method: str = "linear",
-#     **kwargs
-# ) -> UnifiedResNet:
-#     """
-#     Factory function to create a unified ResNet with specified quantization method.
-    
-#     Args:
-#         block_type: BasicBlock or Bottleneck
-#         layers: Number of blocks in each layer
-#         quantization_method: 'linear' or 'log'
-#         **kwargs: Additional arguments (num_classes, device, etc.)
-#     """
-#     # Extract config-specific parameters
-#     device = kwargs.pop('device', None)
-#     threshold = kwargs.pop('threshold', 1e-5)
-#     momentum = kwargs.pop('momentum', 0.1)
-#     bits = kwargs.pop('bits', 8)
-    
-#     # Create config based on method
-#     config = QuantizationConfig(
-#         method=quantization_method,
-#         momentum=momentum,
-#         device=device,
-#         threshold=threshold,
-#         bits = bits
-#     )
-    
-#     return UnifiedResNet(block_type, layers, config=config, **kwargs)
-
-
-# def resnet18(quantization_method="linear", **kwargs):
-#     """ResNet-18 with unified quantization"""
-#     return create_resnet(BasicBlock, [2, 2, 2, 2], quantization_method, **kwargs)
-
-
-# def resnet50(quantization_method="linear", **kwargs):
-#     """ResNet-50 with unified quantization"""
-#     return create_resnet(Bottleneck, [3, 4, 6, 3], quantization_method, **kwargs)
-    
-
-# DELETE create_resnet entirely
-# DELETE create_mobilenetv3 entirely
 
 def resnet18(main_config, **kwargs):
     config = QuantizationConfig(

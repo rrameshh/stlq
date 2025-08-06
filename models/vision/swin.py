@@ -1,11 +1,10 @@
-# models/vision/transformer/swin.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple
 import math
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QLinear,
 )
@@ -36,7 +35,7 @@ def window_partition(x, window_size):
 def window_reverse(windows, window_size, H, W, original_H, original_W):
     """
     Reverse window partition and remove padding
-    FIXED: Use padded dimensions for calculation, original dimensions for cropping
+    Use padded dimensions for calculation, original dimensions for cropping
     """
     # Calculate padded dimensions (what was actually used in window_partition)
     pad_h = (window_size - H % window_size) % window_size
@@ -50,19 +49,7 @@ def window_reverse(windows, window_size, H, W, original_H, original_W):
     
     # Calculate batch size using padded dimensions
     B = windows.shape[0] // (num_windows_h * num_windows_w)
-    
-    # Debug info for troubleshooting
-    if windows.shape[0] % (num_windows_h * num_windows_w) != 0:
-        print(f"🚨 window_reverse error:")
-        print(f"   windows.shape: {windows.shape}")
-        print(f"   window_size: {window_size}")
-        print(f"   Original H, W: {H}, {W}")
-        print(f"   Padded H, W: {padded_H}, {padded_W}")
-        print(f"   num_windows_h, num_windows_w: {num_windows_h}, {num_windows_w}")
-        print(f"   Expected total windows: {num_windows_h * num_windows_w}")
-        print(f"   Actual num windows: {windows.shape[0]}")
-        print(f"   Calculated B: {B}")
-        raise RuntimeError("Window count mismatch in window_reverse")
+
     
     # Reshape using padded dimensions
     C = windows.shape[-1]
@@ -78,7 +65,6 @@ def window_reverse(windows, window_size, H, W, original_H, original_W):
 
 class WindowAttention(nn.Module):
 
-    
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, config=None):
         super().__init__()
         
@@ -103,7 +89,7 @@ class WindowAttention(nn.Module):
             torch.zeros((2 * self.window_size[0] - 1) * (2 * self.window_size[1] - 1), num_heads)
         )
         
-        # Initialize relative position index properly
+        # Initialize relative position index 
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
         coords = torch.stack(torch.meshgrid([coords_h, coords_w], indexing='ij'))  # 2, Wh, Ww
@@ -121,11 +107,9 @@ class WindowAttention(nn.Module):
     def forward(self, x, mask=None):
 
         B_, N, C = x.shape
-        
-        # ============ SAME AS VIT - QUANTIZED ATTENTION ============
+
         x_quantized = self.input_quantizer(x)
         qkv_quantized = self.qkv(x_quantized)
-        
         if isinstance(qkv_quantized, LinearQuantizedTensor):
             qkv = qkv_quantized.dequantize()
         else:
@@ -133,11 +117,9 @@ class WindowAttention(nn.Module):
         
         qkv = qkv.reshape(B_, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
-        
-        # Standard attention computation
         attn = (q @ k.transpose(-2, -1)) * self.scale
         
-        # ============ SWIN-SPECIFIC: ADD RELATIVE POSITION BIAS ============
+        # add relative position bias
         relative_position_bias = self.relative_position_bias_table[
             self.relative_position_index.view(-1)
         ].view(self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)
@@ -153,8 +135,6 @@ class WindowAttention(nn.Module):
         attn = F.softmax(attn, dim=-1)
         
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
-        
-        # ============ SAME AS VIT - QUANTIZED PROJECTION ============
         x_quantized = self.input_quantizer(x)
         x = self.proj(x_quantized)
         
@@ -165,7 +145,6 @@ class WindowAttention(nn.Module):
 
 
 class SwinTransformerBlock(nn.Module):
-    """FIXED: Swin block with proper dimension handling"""
     
     def __init__(self, dim, input_resolution, num_heads, window_size=7, shift_size=0, mlp_ratio=4.0, 
                  qkv_bias=True, drop=0.0, config=None):
@@ -179,20 +158,19 @@ class SwinTransformerBlock(nn.Module):
         self.mlp_ratio = mlp_ratio
         
         if min(self.input_resolution) <= self.window_size:
-            # If window size is larger than input resolution, we don't partition windows
+            # If window size is larger than input resolution, don't partition windows
             self.shift_size = 0
             self.window_size = min(self.input_resolution)
-            print(f"🔧 Block adjusted window_size to {self.window_size} for resolution {self.input_resolution}")
+            print(f"Block adjusted window_size to {self.window_size} for resolution {self.input_resolution}")
             
         assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
         
-        # REUSE YOUR VIT COMPONENTS!
+
         self.norm1 = nn.LayerNorm(dim)
-        # CRITICAL FIX: Use the adjusted window_size for attention
+        # use adjusted window_size for attention
         self.attn = WindowAttention(dim, self.window_size, num_heads, qkv_bias, config)
         
         self.norm2 = nn.LayerNorm(dim)
-        # REUSE YOUR VIT MLP DIRECTLY!
         from .vit import SelectiveQuantizedMLP
         self.mlp = SelectiveQuantizedMLP(
             in_features=dim, 
@@ -201,7 +179,7 @@ class SwinTransformerBlock(nn.Module):
             config=config
         )
         
-        # FIXED: Create attention mask for shifted windows with correct dimensions
+        # Create attention mask for shifted windows with correct dimensions
         if self.shift_size > 0:
             H, W = self.input_resolution
             img_mask = torch.zeros((1, H, W, 1))
@@ -228,7 +206,7 @@ class SwinTransformerBlock(nn.Module):
         self.register_buffer("attn_mask", attn_mask)
     
     def forward(self, x):
-        """FIXED: Forward pass with proper dimension handling"""
+
         H, W = self.input_resolution
         B, L, C = x.shape
         assert L == H * W, f"Input feature has wrong size: expected {H * W}, got {L}"
@@ -259,7 +237,7 @@ class SwinTransformerBlock(nn.Module):
             x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
         else:
             x = shifted_x
-        # x = x.view(B, H * W, C)
+
         x = x.reshape(B, H * W, C)
         
         # FFN
@@ -279,17 +257,14 @@ class PatchMerging(nn.Module):
         self.norm = nn.LayerNorm(4 * dim)
     
     def forward(self, x):
-        """
-        x: B, H*W, C
-        FIXED: Handle odd dimensions by padding
-        """
+ 
         H, W = self.input_resolution
         B, L, C = x.shape
         assert L == H * W, f"Input feature has wrong size: expected {H * W}, got {L}"
         
         x = x.view(B, H, W, C)
         
-        # FIXED: Pad if dimensions are odd
+        # Pad if dimensions are odd
         pad_input = (H % 2 == 1) or (W % 2 == 1)
         if pad_input:
             # Pad the last row/column if needed
@@ -300,7 +275,7 @@ class PatchMerging(nn.Module):
             H = H + pad_h
             W = W + pad_w
         
-        # FIXED: Merge 2x2 patches properly with guaranteed even dimensions
+        # Merge 2x2 patches properly with guaranteed even dimensions
         x0 = x[:, 0::2, 0::2, :]  # B H/2 W/2 C
         x1 = x[:, 1::2, 0::2, :]  # B H/2 W/2 C
         x2 = x[:, 0::2, 1::2, :]  # B H/2 W/2 C
@@ -315,8 +290,9 @@ class PatchMerging(nn.Module):
             x = x.dequantize()
         
         return x
+    
+
 class BasicLayer(nn.Module):
-    """FIXED: Basic layer with proper resolution tracking and odd dimension handling"""
     
     def __init__(self, dim, input_resolution, depth, num_heads, window_size, 
                  mlp_ratio=4., qkv_bias=True, drop=0., downsample=None, config=None):
@@ -342,7 +318,7 @@ class BasicLayer(nn.Module):
         # Patch merging layer
         if downsample is not None:
             self.downsample = downsample(input_resolution, dim=dim, config=config)
-            # FIXED: Calculate output resolution after downsampling with padding consideration
+            # Calculate output resolution after downsampling with padding consideration
             H, W = input_resolution
             # Account for potential padding in PatchMerging
             padded_H = H + (H % 2)  # Add 1 if odd
@@ -362,7 +338,6 @@ class BasicLayer(nn.Module):
         return x
 
 class SwinTransformer(nn.Module):
-    """FIXED: Swin Transformer with proper initialization and dimension tracking"""
 
     def __init__(self, img_size=224, patch_size=4, in_chans=3, num_classes=1000,
                     embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
@@ -370,7 +345,7 @@ class SwinTransformer(nn.Module):
                     attn_drop_rate=0., drop_path_rate=0.1, config=None):
             super().__init__()
 
-            print(f"🔍 Swin Init Debug:")
+            print(f"Swin Init Debug:")
             print(f"  img_size: {img_size}")
             print(f"  patch_size: {patch_size}")
         
@@ -382,7 +357,7 @@ class SwinTransformer(nn.Module):
             self.img_size = img_size
             self.patch_size = patch_size
             
-            # CRITICAL FIX: Calculate actual patch resolution
+            # calculate actual patch resolution
             self.patches_resolution = [img_size // patch_size, img_size // patch_size]
             print(f"  calculated patches_resolution: {self.patches_resolution}")
             
@@ -407,7 +382,7 @@ class SwinTransformer(nn.Module):
                 layer_window_size = min(window_size, min(current_resolution))
                 print(f"Layer {i_layer}: resolution={current_resolution}, window_size={layer_window_size}")
                 
-                # ADDITIONAL FIX: For CIFAR-10, be more conservative with window sizes
+                #  For CIFAR-10, be more conservative with window sizes
                 if max(current_resolution) <= 8:  # Small resolutions like CIFAR-10
                     layer_window_size = min(layer_window_size, 4)  # Cap at 4 for small images
                     print(f"Small image detected, capped window_size to {layer_window_size}")
@@ -467,100 +442,18 @@ class SwinTransformer(nn.Module):
         x = self.norm(x)  # [B, H*W, C]
         x = x.mean(dim=1)  # Global average pooling [B, C]
         
-        # Classification head
         if hasattr(self, 'head_quantizer'):
-            # Quantized classifier
             x_quantized = self.head_quantizer(x)
             x = self.head(x_quantized)
             if isinstance(x, LinearQuantizedTensor):
                 x = x.dequantize()
         else:
-            # FP32 classifier
             x = self.head(x)
         
         return x
-    
-# def create_swin_transformer(variant="tiny", quantization_method="linear", **kwargs):
-#     """Create Swin Transformer variants with PROTECTED configurations"""
-    
-#     configs = {
-#         "tiny": {
-#             "embed_dim": 96, 
-#             "depths": [2, 2, 6, 2], 
-#             "num_heads": [3, 6, 12, 24],
-#             "window_size": 7
-#         },
-#         "small": {
-#             "embed_dim": 96, 
-#             "depths": [2, 2, 18, 2], 
-#             "num_heads": [3, 6, 12, 24],
-#             "window_size": 7
-#         },
-#         "base": {
-#             "embed_dim": 128, 
-#             "depths": [2, 2, 18, 2], 
-#             "num_heads": [4, 8, 16, 32],
-#             "window_size": 7
-#         },
-#     }
-    
-#     if variant not in configs:
-#         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
-    
-#     # Extract config parameters
-#     device = kwargs.pop('device', 'cuda:0')
-#     threshold = kwargs.pop('threshold', 1e-5)
-#     momentum = kwargs.pop('momentum', 0.1)
-#     bits = kwargs.pop('bits', 8)
-#     quantize_classifier = kwargs.pop('quantize_classifier', False)
-    
-#     # Handle img_size properly
-#     img_size = kwargs.get('img_size', 224)
-#     print(f"Swin factory: img_size={img_size} from kwargs={kwargs.get('img_size')}")
-    
-#     from quantization.quant_config import QuantizationConfig
-#     config = QuantizationConfig(
-#         method=quantization_method,
-#         momentum=momentum,
-#         device=device,
-#         threshold=threshold,
-#         bits=bits
-#     )
-#     config.quantize_classifier = quantize_classifier
-    
-#     model_config = configs[variant].copy()  # Make a copy first
-    
-#     # Only allow safe parameters to be overridden
-#     safe_kwargs = {
-#         'img_size': kwargs.get('img_size', 224),
-#         'patch_size': kwargs.get('patch_size', 4),
-#         'in_chans': kwargs.get('in_chans', 3),
-#         'num_classes': kwargs.get('num_classes', 1000),
-#         'drop_rate': kwargs.get('drop_rate', 0.0),
-#         'attn_drop_rate': kwargs.get('attn_drop_rate', 0.0),
-#         'mlp_ratio': kwargs.get('mlp_ratio', 4.0),
-#         'qkv_bias': kwargs.get('qkv_bias', True)
-#     }
-    
-#     # Update with only safe parameters
-#     model_config.update(safe_kwargs)
-    
-#     print(f"Final Swin config: depths={model_config['depths']}, num_heads={model_config['num_heads']}")
-    
-#     return SwinTransformer(config=config, **model_config)
 
-
-# def swin_tiny(quantization_method="linear", **kwargs):
-#     return create_swin_transformer("tiny", quantization_method, **kwargs)
-
-# def swin_small(quantization_method="linear", **kwargs):
-#     return create_swin_transformer("small", quantization_method, **kwargs)
-
-# def swin_base(quantization_method="linear", **kwargs):
-#     return create_swin_transformer("base", quantization_method, **kwargs)
-    
 def swin_tiny(main_config, **kwargs):
-    """Swin-Tiny - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -582,7 +475,7 @@ def swin_tiny(main_config, **kwargs):
     )
 
 def swin_small(main_config, **kwargs):
-    """Swin-Small - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -594,7 +487,7 @@ def swin_small(main_config, **kwargs):
     
     return SwinTransformer(
         embed_dim=96,
-        depths=[2, 2, 18, 2],  # Different from tiny
+        depths=[2, 2, 18, 2],
         num_heads=[3, 6, 12, 24],
         window_size=7,
         config=config,
@@ -604,7 +497,7 @@ def swin_small(main_config, **kwargs):
     )
 
 def swin_base(main_config, **kwargs):
-    """Swin-Base - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -615,9 +508,9 @@ def swin_base(main_config, **kwargs):
     config.quantize_classifier = False
     
     return SwinTransformer(
-        embed_dim=128,  # Different from tiny/small
+        embed_dim=128,  
         depths=[2, 2, 18, 2],
-        num_heads=[4, 8, 16, 32],  # Different from tiny/small
+        num_heads=[4, 8, 16, 32], 
         window_size=7,
         config=config,
         num_classes=main_config.model.num_classes,

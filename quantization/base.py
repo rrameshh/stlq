@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from typing import Optional, Union, Callable, Any
 
 class QuantizedTensorBase(ABC):
-    """Base class for all quantized tensor implementations."""
     
     @abstractmethod
     def dequantize(self) -> torch.Tensor:
@@ -69,61 +68,47 @@ class QuantizedOperatorBase(nn.Module):
         self.activation_quantization = False
         self.momentum = momentum
         self.device = device
-        
-        # All quantized operators need to track batches
         self.register_buffer('num_batches_tracked',
                              torch.tensor(0, dtype=torch.long, device=device))
     
     def update_stats(self, output: torch.Tensor):
         """
         Update statistics needed for quantization.
-        
-        This is a template method - subclasses should override _update_stats_impl
-        to provide method-specific statistics updates.
+
         """
         if not self.training:
             return
-        
         self._update_stats_impl(output)
         self.num_batches_tracked.data.copy_(self.num_batches_tracked + 1)
     
     def _update_stats_impl(self, output: torch.Tensor):
         """
-        Implementation of statistics update, to be overridden by subclasses.
-        
         For linear quantization: update running_min/max
         For log quantization: update running_max_abs  
         For unified operators: route based on config.method
         """
-        # Default implementation does nothing - subclasses override
         pass
     
     def quantize_output(self, output: torch.Tensor):
         """
         Quantize an output tensor.
-        
-        Subclasses should implement this based on their quantization method.
         """
         raise NotImplementedError("Subclasses must implement this method")
     
     def quantize_weight(self, weight: torch.Tensor, per_channel=True):
         """
         Quantize a weight tensor.
-        
-        This is optional for operators that don't have weights (like Add, ReLU).
         """
         raise NotImplementedError("Subclasses must implement this method")
     
     def quantize_bias(self, quantized_input, quantized_weight, bias):
         """
         Quantize a bias tensor.
-        
-        This is optional for operators that don't have bias.
         """
         raise NotImplementedError("Subclasses must implement this method")
     
     def get_quantization_info(self):
-        """Get information about this layer's quantization state."""
+
         info = {
             'type': type(self).__name__,
             'activation_quantization': self.activation_quantization,
@@ -132,7 +117,6 @@ class QuantizedOperatorBase(nn.Module):
             'device': str(self.device) if self.device else None
         }
         
-        # Add method-specific stats if available
         if hasattr(self, 'running_min') and hasattr(self, 'running_max'):
             info['quantization_method'] = 'linear'
             info['running_min'] = self.running_min.item()
@@ -146,16 +130,13 @@ class QuantizedOperatorBase(nn.Module):
         return info
     
     def reset_stats(self):
-        """Reset quantization statistics to initial state."""
+
         if hasattr(self, 'num_batches_tracked'):
             self.num_batches_tracked.data.fill_(0)
-            
-        # Reset method-specific stats
         if hasattr(self, 'running_min') and hasattr(self, 'running_max'):
             self.running_min.data.fill_(0)
             self.running_max.data.fill_(0)
         elif hasattr(self, 'running_max_abs'):
-            # Use eps from config if available
             eps = getattr(self.config, 'eps', 1e-8) if hasattr(self, 'config') else 1e-8
             self.running_max_abs.data.fill_(eps)
     

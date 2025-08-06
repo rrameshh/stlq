@@ -1,13 +1,10 @@
-# utils/training.py
 import torch
 import torch.nn.functional as F
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 from torch.utils.tensorboard import SummaryWriter
 
-
 class TrainingMetrics:
-    """Helper class to track training metrics"""
     
     def __init__(self):
         self.reset()
@@ -19,7 +16,6 @@ class TrainingMetrics:
         self.batch_count = 0
     
     def update(self, loss: float, predictions: torch.Tensor, targets: torch.Tensor):
-        """Update metrics with current batch results"""
         self.running_loss += loss
         _, predicted = predictions.max(1)
         self.total += targets.size(0)
@@ -63,20 +59,16 @@ def train_epoch(
     metrics = TrainingMetrics()
     
     for i, (inputs, targets) in enumerate(train_loader):
-        # Move data to device
         inputs, targets = inputs.to(model.device), targets.to(model.device)
         
-        # Training step
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = F.cross_entropy(outputs, targets)
         loss.backward()
         optimizer.step()
         
-        # Update metrics
         metrics.update(loss.item(), outputs, targets)
-        
-        # Check if it's time to switch to activation quantization
+
         iteration = epoch * len(train_loader) + i
         if switch_hook.after_train_iter(iteration):
             print("Switched to activation quantization")
@@ -102,13 +94,9 @@ def validate(model, test_loader, epoch: int, writer: SummaryWriter) -> float:
     test_loss = 0
     correct = 0
     total = 0
-    
-    # Take just first batch for debugging
-    first_batch = True
-    
+  
     with torch.no_grad():
         for inputs, targets in test_loader:
-            # Get device from model
             device = getattr(model, 'device', next(model.parameters()).device)
             if hasattr(model, 'config') and hasattr(model.config, 'device'):
                 device = model.config.device
@@ -123,7 +111,7 @@ def validate(model, test_loader, epoch: int, writer: SummaryWriter) -> float:
 
     
     accuracy = 100.0 * correct / total
-    # avg_loss = test_loss / 1  # Only one batch for debugging
+
     avg_loss = test_loss/len(test_loader)
     
     print(f'Validation - Epoch: {epoch+1}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.2f}%')

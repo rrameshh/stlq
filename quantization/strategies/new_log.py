@@ -1,4 +1,3 @@
-#ops/strategies/new_log.py
 from .base import QuantizationStrategy
 from ..tensors.new_log import LogQuantizedTensor
 import torch
@@ -20,10 +19,7 @@ class LogStrategy(QuantizationStrategy):
         6. Optionally compute secondary quantization (q2) if error > threshold
         """
 
-        
-
-        config = self.config  # Assuming config has threshold, eps, max_value, etc.
-        
+        config = self.config
         if per_channel:
             return self._quantize_weight_per_channel(weight, config)
         else:

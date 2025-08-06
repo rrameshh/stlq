@@ -1,47 +1,17 @@
-# models/vision/cnn/mobilenet.py
 import torch
 import torch.nn as nn
 from typing import Optional, List, Union
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QConv2dBNRelu, 
     QLinear,
     QAdd,
-    UnifiedQuantizedAdaptiveAvgPool2d,
+    QAdaptiveAvgPool2d,
     QFlatten
 )
 from quantization.quant_config import QuantizationConfig
-
-from quantization.layers.unfused_conv import UnifiedQuantizedConvBatchNormUnfused
-
-
-class UnifiedQuantizedDepthwiseConv2dBatchNorm2dReLU(nn.Module):
-    """Depthwise separable convolution with unified quantization"""
-    
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0,
-                 dilation=1, bias=True, padding_mode='zeros', activation=None,
-                 config: QuantizationConfig = None):
-        super().__init__()
-        
-        # Depthwise convolution
-        self.depthwise = UnifiedQuantizedConvBatchNormUnfused(
-            in_channels, in_channels, kernel_size, stride, padding,
-            dilation, groups=in_channels, bias=bias, padding_mode=padding_mode,
-            activation=activation, config=config
-        )
-        
-        # Pointwise convolution (1x1)
-        self.pointwise = UnifiedQuantizedConvBatchNormUnfused(
-            in_channels, out_channels, kernel_size=1, stride=1, padding=0,
-            dilation=1, groups=1, bias=bias, padding_mode=padding_mode,
-            activation=activation, config=config
-        )
-
-    def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        return x
+from quantization.layers.unfused_conv import QConvBNUnfused
 
 
 class MobileNetV1Block(nn.Module):
@@ -50,7 +20,7 @@ class MobileNetV1Block(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, config: QuantizationConfig = None):
         super().__init__()
         
-        self.depthwise_separable = UnifiedQuantizedConvBatchNormUnfused(
+        self.depthwise_separable = QConvBNUnfused(
             in_channels, out_channels, kernel_size=3, stride=stride, padding=1,
             activation="relu", config=config
         )
@@ -73,19 +43,19 @@ class MobileNetV2Block(nn.Module):
         
         # Expansion phase (1x1 pointwise)
         if expand_ratio != 1:
-            layers.append(UnifiedQuantizedConvBatchNormUnfused(
+            layers.append(QConvBNUnfused(
                 in_channels, hidden_dim, kernel_size=1, stride=1, padding=0,
                 bias=False, activation="relu", config=config
             ))
         
         # Depthwise convolution
-        layers.append(UnifiedQuantizedConvBatchNormUnfused(
+        layers.append(QConvBNUnfused(
             hidden_dim, hidden_dim, kernel_size=3, stride=stride, padding=1,
             groups=hidden_dim, bias=False, activation="relu", config=config
         ))
         
         # Projection phase (1x1 pointwise, no activation)
-        layers.append(UnifiedQuantizedConvBatchNormUnfused(
+        layers.append(QConvBNUnfused(
             hidden_dim, out_channels, kernel_size=1, stride=1, padding=0,
             bias=False, activation=None, config=config
         ))
@@ -102,7 +72,7 @@ class MobileNetV2Block(nn.Module):
         return out
 
 
-class UnifiedMobileNetV1(nn.Module):
+class MobileNetV1(nn.Module):
     
     def __init__(self, config: QuantizationConfig, num_classes: int = 1000, 
                  width_multiplier: float = 1.0):
@@ -147,7 +117,7 @@ class UnifiedMobileNetV1(nn.Module):
             ))
             input_channel = output_channel
         
-        self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
+        self.avgpool = QAdaptiveAvgPool2d((1, 1), config=config)
         self.flatten = QFlatten(1, config=config)
         self.classifier = QLinear(input_channel, num_classes, config=config)
         
@@ -189,8 +159,7 @@ class UnifiedMobileNetV1(nn.Module):
         return x
 
 
-class UnifiedMobileNetV2(nn.Module):
-    """MobileNetV2 with unified quantization support"""
+class MobileNetV2(nn.Module):
     
     def __init__(self, config: QuantizationConfig, num_classes: int = 1000, 
                  width_multiplier: float = 1.0):
@@ -214,7 +183,7 @@ class UnifiedMobileNetV2(nn.Module):
         
         # First conv layer
         self.features = nn.ModuleList([
-            UnifiedQuantizedConvBatchNormUnfused(
+            QConvBNUnfused(
                 3, input_channel, kernel_size=3, stride=2, padding=1,
                 bias=False, activation="relu", config=config
             )
@@ -243,12 +212,12 @@ class UnifiedMobileNetV2(nn.Module):
                 input_channel = output_channel
         
         # Last conv layer
-        self.features.append(UnifiedQuantizedConvBatchNormUnfused(
+        self.features.append(QConvBNUnfused(
             input_channel, last_channel, kernel_size=1, stride=1, padding=0,
             bias=False, activation="relu", config=config
         ))
         
-        self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
+        self.avgpool = QAdaptiveAvgPool2d((1, 1), config=config)
         self.flatten = QFlatten(1, config=config)
         self.classifier = QLinear(last_channel, num_classes, config=config)
         
@@ -288,56 +257,9 @@ class UnifiedMobileNetV2(nn.Module):
         x = self._dequantize(x)
         
         return x
-
-
-# # Factory functions
-# def create_mobilenet(
-#     version: str,
-#     quantization_method: str = "linear",
-#     **kwargs
-# ) -> Union[UnifiedMobileNetV1, UnifiedMobileNetV2]:
-#     """
-#     Factory function to create a unified MobileNet with specified quantization method.
-    
-#     Args:
-#         version: 'v1' or 'v2'
-#         quantization_method: 'linear' or 'log'
-#         **kwargs: Additional arguments (num_classes, device, etc.)
-#     """
-#     # Extract config-specific parameters
-#     device = kwargs.pop('device', None)
-#     threshold = kwargs.pop('threshold', 1e-5)
-#     momentum = kwargs.pop('momentum', 0.1)
-#     bits = kwargs.pop('bits', 8)
-    
-#     # Create config based on method
-#     config = QuantizationConfig(
-#         method=quantization_method,
-#         momentum=momentum,
-#         device=device,
-#         threshold=threshold,
-#         bits=bits
-#     )
-    
-#     if version.lower() == 'v1':
-#         return UnifiedMobileNetV1(config=config, **kwargs)
-#     elif version.lower() == 'v2':
-#         return UnifiedMobileNetV2(config=config, **kwargs)
-#     else:
-#         raise ValueError(f"Unknown MobileNet version: {version}")
-
-
-# def mobilenetv1(quantization_method="linear", **kwargs):
-#     """MobileNetV1 with unified quantization"""
-#     return create_mobilenet('v1', quantization_method, **kwargs)
-
-
-# def mobilenetv2(quantization_method="linear", **kwargs):
-#     """MobileNetV2 with unified quantization"""
-#     return create_mobilenet('v2', quantization_method, **kwargs)
     
 def mobilenetv1(main_config, **kwargs):
-    """MobileNetV1 - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -345,10 +267,10 @@ def mobilenetv1(main_config, **kwargs):
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
     )
-    return UnifiedMobileNetV1(config=config, num_classes=main_config.model.num_classes, **kwargs)
+    return MobileNetV1(config=config, num_classes=main_config.model.num_classes, **kwargs)
 
 def mobilenetv2(main_config, **kwargs):
-    """MobileNetV2 - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -356,4 +278,4 @@ def mobilenetv2(main_config, **kwargs):
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
     )
-    return UnifiedMobileNetV2(config=config, num_classes=main_config.model.num_classes, **kwargs)
+    return MobileNetV2(config=config, num_classes=main_config.model.num_classes, **kwargs)

@@ -1,11 +1,10 @@
-# models/vision/transformer/vit.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 import math
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QLinear,
 )

@@ -5,7 +5,6 @@ import torchvision.models as models
 import timm
 from pathlib import Path
 
-# Import your existing loading functions
 from .load_pretrained import (
     load_pretrained_resnet,
     load_pretrained_mobilenet,
@@ -14,7 +13,6 @@ from .load_pretrained import (
     load_pretrained_swin
 )
 
-# Model type mapping - auto-detect from name
 MODEL_TYPES = {
     # CNN models
     'resnet': ['resnet18', 'resnet50'],

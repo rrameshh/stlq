@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-"""
-QAT Framework - Clean Training Script
-"""
 
 import argparse
 import sys
@@ -21,7 +17,7 @@ def create_parser():
     return parser
 
 def main():
-    """Main training function."""
+   
     parser = create_parser()
     args = parser.parse_args()
     

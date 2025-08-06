@@ -1,11 +1,9 @@
-# ops/strategies/linear.py
 from .base import QuantizationStrategy
 from ..tensors.linear import LinearQuantizedTensor
 import torch
 
 class LinearStrategy(QuantizationStrategy):
-    """Linear quantization strategy - matches your original QuantizedConv2dBatchNorm2dReLU._quantize_weight"""
-    
+ 
     def quantize_weight(self, weight: torch.Tensor, per_channel: bool = True):        
         if per_channel and weight.ndim >= 2:
             return self._quantize_weight_per_channel(weight)
@@ -45,7 +43,7 @@ class LinearStrategy(QuantizationStrategy):
     
     def quantize_bias(self, bias: torch.Tensor, quantized_input, quantized_weight):
         """
-        Unified bias quantization handling both Conv2d and Linear cases.
+        bias quantization handling both Conv2d and Linear cases.
         
         Conv2d: weight_scale is [out_ch, 1, 1, 1] -> reshape to [out_ch]
         Linear: weight_scale is scalar -> broadcast to [out_features]

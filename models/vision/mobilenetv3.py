@@ -1,26 +1,24 @@
-# models/vision/cnn/mobilenetv3.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, List, Union
 import math
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QConv2dBNRelu, 
     QLinear,
     QAdd,
     QRelu,
-    UnifiedQuantizedAdaptiveAvgPool2d,
+    QAdaptiveAvgPool2d,
     QFlatten
 )
 from quantization.quant_config import QuantizationConfig
-from quantization.layers.unfused_conv import UnifiedQuantizedConvBatchNormUnfused
+from quantization.layers.unfused_conv import QConvBNUnfused
 from quantization.tensors.linear import LinearQuantizedTensor
 
 
 def _make_divisible(v, divisor=8, min_value=None):
-    """Make channels divisible by divisor"""
     if min_value is None:
         min_value = divisor
     new_v = max(min_value, int(v + divisor / 2) // divisor * divisor)
@@ -35,15 +33,12 @@ class SEModule(nn.Module):
         super().__init__()
         reduced_channels = _make_divisible(channels // reduction)
         
-        # QUANTIZED: Heavy compute operations
-        self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
+        self.avgpool = QAdaptiveAvgPool2d((1, 1), config=config)
         self.fc1 = QLinear(channels, reduced_channels, config=config)
         self.fc2 = QLinear(reduced_channels, channels, config=config)
         
-        # FP32: Lightweight, numerically sensitive operations
         self.hardsigmoid = nn.Hardsigmoid(inplace=True)
         
-        # Input quantizer for explicit transition management
         self.input_quantizer = Quantize(config=config)
         
     def forward(self, x):
@@ -144,14 +139,14 @@ class MobileNetV3Block(nn.Module):
         
         # Expansion phase (1x1 pointwise) - only if expand_ratio != 1
         if expand_ratio != 1:
-            layers.append(UnifiedQuantizedConvBatchNormUnfused(
+            layers.append(QConvBNUnfused(
                 in_channels, hidden_dim, kernel_size=1, stride=1, padding=0,
                 bias=False, activation=activation, config=config
             ))
         
         # Depthwise convolution
         padding = (kernel_size - 1) // 2
-        layers.append(UnifiedQuantizedConvBatchNormUnfused(
+        layers.append(QConvBNUnfused(
             hidden_dim, hidden_dim, kernel_size=kernel_size, stride=stride, 
             padding=padding, groups=hidden_dim, bias=False, activation=activation, config=config
         ))
@@ -161,7 +156,7 @@ class MobileNetV3Block(nn.Module):
             layers.append(SEModule(hidden_dim, config=config))
         
         # Projection phase (1x1 pointwise, no activation)
-        layers.append(UnifiedQuantizedConvBatchNormUnfused(
+        layers.append(QConvBNUnfused(
             hidden_dim, out_channels, kernel_size=1, stride=1, padding=0,
             bias=False, activation=None, config=config
         ))
@@ -204,7 +199,7 @@ class MobileNetV3(nn.Module):
         self.quantize = Quantize(config=config)
         
         self.features = nn.ModuleList([
-            UnifiedQuantizedConvBatchNormUnfused(
+            QConvBNUnfused(
                 3, input_channel, kernel_size=3, stride=2, padding=1,
                 bias=False, activation="hardswish" if variant == "large" else "relu", 
                 config=config
@@ -221,14 +216,14 @@ class MobileNetV3(nn.Module):
             input_channel = output_channel
         
         # Last conv layer
-        self.features.append(UnifiedQuantizedConvBatchNormUnfused(
+        self.features.append(QConvBNUnfused(
             input_channel, last_channel, kernel_size=1, stride=1, padding=0,
             bias=False, activation="hardswish" if variant == "large" else "relu", 
             config=config
         ))
         
         # Classifier
-        self.avgpool = UnifiedQuantizedAdaptiveAvgPool2d((1, 1), config=config)
+        self.avgpool = QAdaptiveAvgPool2d((1, 1), config=config)
         self.flatten = QFlatten(1, config=config)
         
         # Classifier head with optional intermediate layer for large variant
@@ -326,49 +321,8 @@ class MobileNetV3(nn.Module):
         return x
 
 
-# # Factory functions
-# def create_mobilenetv3(
-#     variant: str,
-#     quantization_method: str = "linear",
-#     **kwargs
-# ) -> MobileNetV3:
-#     """
-#     Factory function to create a unified MobileNetV3 with specified quantization method.
-    
-#     Args:
-#         variant: 'large' or 'small'
-#         quantization_method: 'linear' or 'log'
-#         **kwargs: Additional arguments (num_classes, device, etc.)
-#     """
-#     # Extract config-specific parameters
-#     device = kwargs.pop('device', None)
-#     threshold = kwargs.pop('threshold', 1e-5)
-#     momentum = kwargs.pop('momentum', 0.1)
-#     bits = kwargs.pop('bits', 8)
-    
-#     # Create config based on method
-#     config = QuantizationConfig(
-#         method=quantization_method,
-#         momentum=momentum,
-#         device=device,
-#         threshold=threshold,
-#         bits=bits
-#     )
-    
-#     return MobileNetV3(config=config, variant=variant, **kwargs)
-
-
-# def mobilenetv3_large(quantization_method="linear", **kwargs):
-#     """MobileNetV3-Large with unified quantization"""
-#     return create_mobilenetv3('large', quantization_method, **kwargs)
-
-
-# def mobilenetv3_small(quantization_method="linear", **kwargs):
-#     """MobileNetV3-Small with unified quantization"""
-#     return create_mobilenetv3('small', quantization_method, **kwargs)
-
 def mobilenetv3_large(main_config, **kwargs):
-    """MobileNetV3-Large - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -385,7 +339,7 @@ def mobilenetv3_large(main_config, **kwargs):
     )
 
 def mobilenetv3_small(main_config, **kwargs):
-    """MobileNetV3-Small - takes main config"""
+
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,

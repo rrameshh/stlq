@@ -1,4 +1,3 @@
-# models/vision/transformer/deit.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +8,7 @@ from .vit import (
     SelectiveQuantizedTransformerBlock,
     PatchEmbedding
 )
-from quantization.layers.all import QLinear, Quantize
+from quantization.layers.quantized import QLinear, Quantize
 from quantization.quant_config import QuantizationConfig
 
 
@@ -17,11 +16,9 @@ class DeiT(ViT):
     """
     Data-efficient Image Transformer (DeiT)
     
-    Key differences from ViT:
     1. Distillation token (in addition to class token)
     2. Dual classification heads (class + distillation)
     3. Teacher-student training support
-    4. Same transformer architecture (including MLP layers)
     
     """
     
@@ -53,14 +50,12 @@ class DeiT(ViT):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
         
 
-        # Replace single head with dual classification heads
-        # Remove the inherited single head
         if hasattr(self, 'head'):
             del self.head
         if hasattr(self, 'head_quantizer'):
             del self.head_quantizer
             
-        # Create dual heads
+
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             # Both heads quantized (buggy)
@@ -72,23 +67,20 @@ class DeiT(ViT):
             self.head_cls = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
             self.head_dist = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         
-        # Initialize new parameters
         self._init_deit_weights()
         
     def _init_deit_weights(self):
-        """Initialize DeiT-specific parameters"""
         torch.nn.init.trunc_normal_(self.dist_token, std=0.02)
         torch.nn.init.trunc_normal_(self.pos_embed, std=0.02)
         
-        # Initialize dual heads
-        if hasattr(self.head_cls, 'linear'):  # Quantized head
+        if hasattr(self.head_cls, 'linear'):
             torch.nn.init.trunc_normal_(self.head_cls.linear.weight, std=0.02)
             torch.nn.init.trunc_normal_(self.head_dist.linear.weight, std=0.02)
             if self.head_cls.linear.bias is not None:
                 nn.init.constant_(self.head_cls.linear.bias, 0)
             if self.head_dist.linear.bias is not None:
                 nn.init.constant_(self.head_dist.linear.bias, 0)
-        else:  # FP32 head
+        else:
             torch.nn.init.trunc_normal_(self.head_cls.weight, std=0.02)
             torch.nn.init.trunc_normal_(self.head_dist.weight, std=0.02)
             if self.head_cls.bias is not None:
@@ -97,15 +89,12 @@ class DeiT(ViT):
                 nn.init.constant_(self.head_dist.bias, 0)
     
     def forward_features(self, x):
-        """
-        Forward through transformer blocks with dual tokens
-        """
+
         B = x.shape[0]
         
-        # Patch embedding (reuses parent implementation)
         x = self.patch_embed(x)
         
-        # Add BOTH cls and distillation tokens
+        # Add cls and distillation tokens
         cls_tokens = self.cls_token.expand(B, -1, -1)
         dist_tokens = self.dist_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, dist_tokens, x), dim=1)
@@ -114,11 +103,8 @@ class DeiT(ViT):
         x = x + self.pos_embed
         x = self.pos_drop(x)
         
-        # Transformer blocks (reuses ALL parent implementation including MLP!)
         for blk in self.blocks:
             x = blk(x)
-        
-        # Final norm (reuses parent implementation)
         x = self.norm(x)
         
         return x
@@ -131,26 +117,21 @@ class DeiT(ViT):
             - During training: (cls_logits, dist_logits, teacher_logits)
             - During inference: averaged logits or cls_logits only
         """
-        # Store original input for teacher model
+
         original_input = x
-        
-        # Forward through DeiT
         features = self.forward_features(x)
         
-        # Extract tokens
         cls_token = features[:, 0]  # Classification token
         dist_token = features[:, 1]  # Distillation token
         
-        # Dual classification heads
+
         if hasattr(self, 'head_quantizer'):
-            # Quantized heads
             cls_quantized = self.head_quantizer(cls_token)
             dist_quantized = self.head_quantizer(dist_token)
             
             cls_logits = self.head_cls(cls_quantized)
             dist_logits = self.head_dist(dist_quantized)
             
-            # Dequantize outputs if needed
             if hasattr(cls_logits, 'dequantize'):
                 cls_logits = cls_logits.dequantize()
             if hasattr(dist_logits, 'dequantize'):
@@ -160,11 +141,9 @@ class DeiT(ViT):
             cls_logits = self.head_cls(cls_token)
             dist_logits = self.head_dist(dist_token)
         
-        # Get teacher logits if available and requested
         teacher_logits = None
         if self.training and self.teacher_model is not None and return_teacher_logits:
             with torch.no_grad():
-                # FIXED: Pass original input (raw images) to teacher model
                 teacher_logits = self.teacher_model(original_input)
         
         if self.training:
@@ -225,64 +204,8 @@ class DeiTLoss(nn.Module):
             'soft_loss': soft_loss
         }
 
-
-# # Factory functions
-# def create_deit(
-#     variant="small", 
-#     quantization_method="linear", 
-#     teacher_model=None,
-#     **kwargs
-# ) -> DeiT:
-#     """
-#     Create DeiT model using the corrected implementation
-#     """
-    
-#     configs = {
-#         "tiny": {"embed_dim": 192, "depth": 12, "num_heads": 3},
-#         "small": {"embed_dim": 384, "depth": 12, "num_heads": 6}, 
-#         "base": {"embed_dim": 768, "depth": 12, "num_heads": 12},
-#     }
-    
-#     if variant not in configs:
-#         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
-    
-#     # Extract config parameters
-#     device = kwargs.pop('device', 'cuda:0')
-#     threshold = kwargs.pop('threshold', 1e-5)
-#     momentum = kwargs.pop('momentum', 0.1)
-#     bits = kwargs.pop('bits', 8)
-#     quantize_classifier = kwargs.pop('quantize_classifier', False)
-    
-#     # Create quantization config
-#     config = QuantizationConfig(
-#         method=quantization_method,
-#         momentum=momentum,
-#         device=device,
-#         threshold=threshold,
-#         bits=bits
-#     )
-#     config.quantize_classifier = quantize_classifier
-    
-#     # Merge configs
-#     model_config = configs[variant]
-#     model_config.update(kwargs)
-    
-#     return DeiT(config=config, teacher_model=teacher_model, **model_config)
-
-
-# # Convenient factory functions
-# def deit_tiny(**kwargs):
-#     return create_deit("tiny", **kwargs)
-
-# def deit_small(**kwargs):
-#     return create_deit("small", **kwargs)
-
-# def deit_base(**kwargs):
-#     return create_deit("base", **kwargs)
-
-
 def deit_tiny(main_config, **kwargs):
-    """DeiT-Tiny - takes main config"""
+    
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,

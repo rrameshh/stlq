@@ -10,13 +10,12 @@ from ..tensors.new_log import LogQuantizedTensor
 from ..strategies.factory import create_strategy
 from ..quant_config import QuantizationConfig
 
-from .all import Quantizer
-
-# Type alias for any quantized tensor
+from .quantized import Quantizer
+r
 QuantizedTensorType = Union[LinearQuantizedTensor, LogQuantizedTensor]
 
-class UnifiedQuantizedConvBatchNormUnfused(Quantizer):
-    """Unfused Conv2d+BN+ReLU layer - applies conv and bn separately (no weight fusion)"""
+class QConvBNUnfused(Quantizer):
+    """applies conv and bn separately (no weight fusion)"""
     
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0,
                  dilation=1, groups=1, bias=True, padding_mode='zeros', activation=None,
@@ -41,11 +40,9 @@ class UnifiedQuantizedConvBatchNormUnfused(Quantizer):
         
 
     def _quantize_weight(self, weight: torch.Tensor):
-        """Use strategy for weight quantization"""
         return self.strategy.quantize_weight(weight, per_channel=True)
 
     def _quantize_bias(self, quantized_input: QuantizedTensorType, quantized_weight: QuantizedTensorType, bias: torch.Tensor):
-        """Use strategy for bias quantization"""
         return self.strategy.quantize_bias(bias, quantized_input, quantized_weight)
 
     def _activation_not_quantized_forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -62,10 +59,10 @@ class UnifiedQuantizedConvBatchNormUnfused(Quantizer):
         # Real conv output (original weights)
         real_conv_output = self.conv2d(input)
         
-        # STE ONLY on convolution
+        # STE on convolution
         ste_conv_output = real_conv_output - (real_conv_output - simulated_conv_output).detach()
         
-        # THEN apply BN and activation to STE result
+        # BN on convolved output
         bn_output = self.bn2d(ste_conv_output)
         final_output = self._apply_activation(bn_output)
         
@@ -74,42 +71,41 @@ class UnifiedQuantizedConvBatchNormUnfused(Quantizer):
 
     def _quantize_conv_bias_only(self, bias: torch.Tensor):
         """Quantize conv bias independently (not accounting for BN scaling)"""
-        # For unfused operations, we quantize conv bias on its own scale
+        # For unfused operations, quantize conv bias on its own scale
         # BN will handle the scaling afterward
         # return self.strategy.quantize_bias_independent(bias)
         return bias
     
 
     def _activation_quantized_forward(self, input: QuantizedTensorType) -> QuantizedTensorType:
-        """Fixed: Targeted STE approach for quantized input activations"""
         
         with torch.no_grad():
-            # Step 1: Quantize conv weights only
+            # Quantize conv weights only
             quantized_conv_weight = self._quantize_weight(self.conv2d.weight)
             quantized_conv_bias = None
             
-            # Step 2: Handle conv bias quantization
+            # Handle conv bias quantization
             if self.conv2d.bias is not None:
                 quantized_conv_bias = self._quantize_conv_bias_only(self.conv2d.bias)
                 conv_bias_val = quantized_conv_bias.dequantize() if hasattr(quantized_conv_bias, 'dequantize') else quantized_conv_bias
             else:
                 conv_bias_val = None
             
-            # Step 3: Simulated quantized conv output (for STE)
+            # simulated quantized conv output (for STE)
             simulated_conv_output = F.conv2d(
                 input.dequantize(), quantized_conv_weight.dequantize(), conv_bias_val,
                 self.conv2d.stride, self.conv2d.padding, self.conv2d.dilation, self.conv2d.groups
             )
         
-        # Step 4: Real conv output (original weights)
+        # real conv output (original weights)
         real_conv_output = self.conv2d(input.dequantize())
         ste_conv_output = real_conv_output - (real_conv_output - simulated_conv_output).detach()
         
-        # Step 6: Apply BatchNorm and activation to STE result (single path)
+         # BN on convolved output
         bn_output = self.bn2d(ste_conv_output)
         final_output = self._apply_activation(bn_output)
         
-        # Step 7: Update stats and quantize output
+        # update stats and quantize output
         self.update_stats(final_output)
         quantized_output = self.quantize_output(final_output)
         

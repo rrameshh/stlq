@@ -1,11 +1,10 @@
-# models/language/tinybert.py - TinyBERT with Unified Quantization
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 import math
 
-from quantization.layers.all import (
+from quantization.layers.quantized import (
     Quantize,
     QLinear,
 )
@@ -14,25 +13,20 @@ from quantization.tensors.linear import LinearQuantizedTensor
 
 
 class BERTEmbeddings(nn.Module):
-    """
-    BERT embeddings: token + position + token_type embeddings
-    Kept in FP32 for precision (industry standard)
-    """
+
     
     def __init__(self, vocab_size, hidden_size, max_position_embeddings=512, 
                  type_vocab_size=2, dropout=0.1):
         super().__init__()
         
-        # All embeddings in FP32
+
         self.token_embeddings = nn.Embedding(vocab_size, hidden_size)
         self.position_embeddings = nn.Embedding(max_position_embeddings, hidden_size)
         self.token_type_embeddings = nn.Embedding(type_vocab_size, hidden_size)
         
-        # Layer norm and dropout (FP32)
         self.layer_norm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
         
-        # Pre-compute position ids
         self.register_buffer("position_ids", torch.arange(max_position_embeddings).expand((1, -1)))
     
     def forward(self, input_ids, token_type_ids=None, position_ids=None):
@@ -58,10 +52,6 @@ class BERTEmbeddings(nn.Module):
 
 
 class BERTAttention(nn.Module):
-    """
-    BERT Multi-head self-attention - similar to your ViT/TinyGPT attention
-    but without causal masking (bidirectional)
-    """
     
     def __init__(self, hidden_size, num_heads=8, dropout=0.1, config=None):
         super().__init__()
@@ -73,46 +63,31 @@ class BERTAttention(nn.Module):
         self.scale = self.head_dim ** -0.5
         self.config = config
         
-        # QUANTIZED: Heavy compute linear layers (like your ViT)
         self.qkv = QLinear(hidden_size, hidden_size * 3, bias=True, config=config)
         self.out_proj = QLinear(hidden_size, hidden_size, bias=True, config=config)
         
-        # FP32: Lightweight operations
         self.dropout = nn.Dropout(dropout)
         
-        # Input quantizer for explicit transition management
         self.input_quantizer = Quantize(config=config)
     
     def forward(self, hidden_states, attention_mask=None):
-        """
-        BERT self-attention (bidirectional, unlike TinyGPT's causal attention)
-        """
+
         B, T, C = hidden_states.shape
         
-        # ============ EXPLICIT TRANSITION 1: FP32 → INT8 ============
         assert isinstance(hidden_states, torch.Tensor) and not isinstance(hidden_states, LinearQuantizedTensor), \
             "Expected FP32 input from LayerNorm"
         
-        # Quantize input for heavy compute
         x_quantized = self.input_quantizer(hidden_states)
-        
-        # ============ QUANTIZED COMPUTE: QKV PROJECTION ============
         qkv_quantized = self.qkv(x_quantized)
-        
-        # ============ EXPLICIT TRANSITION 2: INT8 → FP32 ============
         if isinstance(qkv_quantized, LinearQuantizedTensor):
             qkv_fp32 = qkv_quantized.dequantize()
         else:
             qkv_fp32 = qkv_quantized
         
-        # ============ FP32 COMPUTE: SELF-ATTENTION ============
         qkv_reshaped = qkv_fp32.reshape(B, T, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv_reshaped[0], qkv_reshaped[1], qkv_reshaped[2]
-        
-        # Attention computation (bidirectional - no causal mask)
         attn_scores = (q @ k.transpose(-2, -1)) * self.scale  # [B, num_heads, T, T]
         
-        # Apply attention mask if provided (for padding tokens)
         if attention_mask is not None:
             # Convert attention mask to attention scores mask
             extended_attention_mask = attention_mask[:, None, None, :]
@@ -125,7 +100,6 @@ class BERTAttention(nn.Module):
         out = attn_weights @ v  # [B, num_heads, T, head_dim]
         out = out.transpose(1, 2).reshape(B, T, C)  # [B, T, C]
         
-        # ============ EXPLICIT TRANSITION 3: FP32 → INT8 → FP32 ============
         out_quantized = self.input_quantizer(out)
         out_proj_quantized = self.out_proj(out_quantized)
         
@@ -148,19 +122,16 @@ class BERTMLP(nn.Module):
         
         self.config = config
         
-        # QUANTIZED: Heavy compute linear layers
         self.dense1 = QLinear(hidden_size, intermediate_size, config=config)
         self.dense2 = QLinear(intermediate_size, hidden_size, config=config)
         
-        # FP32: Activation and dropout
         self.act = nn.GELU()
         self.dropout = nn.Dropout(dropout)
         
-        # Input quantizer
         self.input_quantizer = Quantize(config=config)
     
     def forward(self, hidden_states):
-        """Same flow as your ViT/TinyGPT MLP"""
+
         # FP32 → INT8
         x_quantized = self.input_quantizer(hidden_states)
         
@@ -189,20 +160,15 @@ class BERTMLP(nn.Module):
 
 
 class BERTLayer(nn.Module):
-    """
-    BERT Transformer Layer - similar to your ViT transformer block
-    """
-    
+
     def __init__(self, hidden_size, num_heads, intermediate_size, dropout=0.1, config=None):
         super().__init__()
         
         self.config = config
         
-        # FP32: LayerNorm (industry standard)
         self.attention_norm = nn.LayerNorm(hidden_size)
         self.mlp_norm = nn.LayerNorm(hidden_size)
         
-        # Quantized attention and MLP
         self.attention = BERTAttention(hidden_size, num_heads, dropout, config)
         self.mlp = BERTMLP(hidden_size, intermediate_size, dropout, config)
     
@@ -210,11 +176,9 @@ class BERTLayer(nn.Module):
         """
         BERT layer forward pass with explicit quantization flow
         """
-        # Ensure input is FP32
         assert isinstance(hidden_states, torch.Tensor) and not isinstance(hidden_states, LinearQuantizedTensor), \
             "BERT layer expects FP32 input"
         
-        # ============ ATTENTION BLOCK ============
         # FP32 LayerNorm → FP32
         normed_states = self.attention_norm(hidden_states)
         
@@ -247,13 +211,12 @@ class BERTPooler(nn.Module):
         
         self.config = config
         
-        # Classification head choice
+
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.dense = QLinear(hidden_size, hidden_size, config=config)
             self.pooler_quantizer = Quantize(config=config)
         else:
-            # Industry standard: Keep pooler in FP32
             self.dense = nn.Linear(hidden_size, hidden_size)
         
         self.activation = nn.Tanh()
@@ -278,10 +241,6 @@ class BERTPooler(nn.Module):
 
 
 class TinyBERT(nn.Module):
-    """
-    TinyBERT model with unified quantization
-    Encoder-only transformer for classification and understanding tasks
-    """
     
     def __init__(self, vocab_size=30522, hidden_size=384, num_layers=4, num_heads=6, 
                  intermediate_size=1536, max_position_embeddings=512, type_vocab_size=2,
@@ -292,7 +251,6 @@ class TinyBERT(nn.Module):
         self.num_classes = num_classes
         self.hidden_size = hidden_size
         
-        # ============ FP32 EMBEDDINGS ============
         self.embeddings = BERTEmbeddings(
             vocab_size=vocab_size,
             hidden_size=hidden_size,
@@ -301,31 +259,25 @@ class TinyBERT(nn.Module):
             dropout=dropout
         )
         
-        # ============ QUANTIZED TRANSFORMER LAYERS ============
         self.encoder_layers = nn.ModuleList([
             BERTLayer(hidden_size, num_heads, intermediate_size, dropout, config)
             for _ in range(num_layers)
         ])
         
-        # ============ POOLING AND CLASSIFICATION ============
         self.pooler = BERTPooler(hidden_size, config)
         
-        # Classification head
         quantize_classifier = getattr(config, 'quantize_classifier', False)
         if quantize_classifier:
             self.classifier = QLinear(hidden_size, num_classes, config=config)
             self.classifier_quantizer = Quantize(config=config)
         else:
-            # Industry standard: Keep classifier in FP32
             self.classifier = nn.Linear(hidden_size, num_classes) if num_classes > 0 else nn.Identity()
         
-        # Dropout for classifier
         self.dropout = nn.Dropout(dropout)
         
         self._init_weights()
     
     def _init_weights(self):
-        """Initialize weights following BERT initialization"""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -352,32 +304,25 @@ class TinyBERT(nn.Module):
             Else: logits
         """
         
-        # ============ FP32 EMBEDDING PHASE ============
         embedded = self.embeddings(input_ids, token_type_ids)
-        
-        # ============ QUANTIZED TRANSFORMER LAYERS ============
         hidden_states = embedded
         for layer in self.encoder_layers:
             hidden_states = layer(hidden_states, attention_mask)
         
-        # ============ POOLING AND CLASSIFICATION ============
         # Extract [CLS] representation
         pooled_output = self.pooler(hidden_states)
         pooled_output = self.dropout(pooled_output)
         
-        # Classification head
+
         if hasattr(self, 'classifier_quantizer'):
-            # Quantized classifier
             pooled_quantized = self.classifier_quantizer(pooled_output)
             logits = self.classifier(pooled_quantized)
             if isinstance(logits, LinearQuantizedTensor):
                 logits = logits.dequantize()
         else:
-            # FP32 classifier
             logits = self.classifier(pooled_output)
         
         if labels is not None:
-            # Compute loss
             if self.num_classes == 1:
                 # Regression
                 loss = F.mse_loss(logits.squeeze(), labels.float())
@@ -388,8 +333,8 @@ class TinyBERT(nn.Module):
         
         return logits
 
+# TO FIX **
 
-# Factory functions for different TinyBERT sizes
 def create_tiny_bert(variant="tiny", quantization_method="linear", **kwargs):
     """
     Create TinyBERT variants
@@ -406,7 +351,6 @@ def create_tiny_bert(variant="tiny", quantization_method="linear", **kwargs):
     if variant not in configs:
         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
     
-    # Extract config parameters
     device = kwargs.pop('device', 'cuda:0')
     threshold = kwargs.pop('threshold', 1e-5)
     momentum = kwargs.pop('momentum', 0.1)
