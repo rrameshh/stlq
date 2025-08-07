@@ -251,7 +251,7 @@ def _create_swin_mapping(pretrained_dict, custom_dict, is_quantized):
 # ============================================================================
 
 def _load_cnn_weights(model, pretrained_model, weight_mapping, model_name, num_classes):
-    """Unified CNN weight loading"""
+
     pretrained_dict = pretrained_model.state_dict()
     custom_dict = model.state_dict()
     
@@ -441,18 +441,18 @@ def _create_mobilenetv1_timm_mapping(custom_dict, num_classes):
     
     return mapping
 
-def load_pretrained_mobilenet(model, version="v2", num_classes=100):
+def load_pretrained_mobilenet(model, variant="v2", num_classes=100):
 
-    print(f"Loading pretrained MobileNet-{version} weights...")
+    print(f"Loading pretrained MobileNet-{variant} weights...")
     
     try:
-        if version == "v1":
+        if variant == "v1":
             # Use timm for MobileNet v1
             import timm
             try:
                 pretrained_model = timm.create_model('mobilenetv1_100', pretrained=True)
                 weight_mapping = _create_mobilenetv1_timm_mapping(model.state_dict(), num_classes)
-                return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{version}", num_classes)
+                return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{variant}", num_classes)
             except Exception as timm_error:
                 print(f"⚠️  Failed to load from timm: {timm_error}")
                 print("Trying alternative timm model names...")
@@ -464,38 +464,38 @@ def load_pretrained_mobilenet(model, version="v2", num_classes=100):
                         pretrained_model = timm.create_model(alt_name, pretrained=True)
                         weight_mapping = _create_mobilenetv1_timm_mapping(model.state_dict(), num_classes)
                         print(f"Successfully loaded {alt_name} from timm")
-                        return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{version}", num_classes)
+                        return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{variant}", num_classes)
                     except:
                         continue
                 
                 raise ValueError("No working MobileNet-v1 model found in timm")
             
-        elif version == "v2":
+        elif variant == "v2":
             import torchvision.models as models
             pretrained_model = models.mobilenet_v2(pretrained=True)
             weight_mapping = _create_mobilenetv2_mapping(model.state_dict(), num_classes)
-            return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{version}", num_classes)
+            return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{variant}", num_classes)
             
-        elif version in ["v3_small", "v3_large"]:
+        elif variant in ["v3_small", "v3_large"]:
             import torchvision.models as models
-            if version == "v3_small":
+            if variant == "v3_small":
                 pretrained_model = models.mobilenet_v3_small(pretrained=True)
             else:
                 pretrained_model = models.mobilenet_v3_large(pretrained=True)
             weight_mapping = _create_mobilenetv3_mapping(model.state_dict(), num_classes)
-            return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{version}", num_classes)
+            return _load_cnn_weights(model, pretrained_model, weight_mapping, f"MobileNet-{variant}", num_classes)
             
         else:
-            raise ValueError(f"Unknown MobileNet version: {version}")
+            raise ValueError(f"Unknown MobileNet version: {variant}")
         
     except Exception as e:
-        print(f"⚠️  Failed to load MobileNet-{version} pretrained weights: {e}")
+        print(f"⚠️  Failed to load MobileNet-{variant} pretrained weights: {e}")
         print("Continuing with random initialization...")
         return model
 
 
 def _create_mobilenetv2_mapping(custom_dict, num_classes):
-    """Create complete weight mapping for MobileNet v2"""
+
     mapping = {}
     
     # First conv layer (features.0)
@@ -617,7 +617,6 @@ def _create_mobilenetv2_mapping(custom_dict, num_classes):
 def _create_mobilenetv3_mapping(custom_dict, num_classes):
     """Create weight mapping for MobileNet v3 (simplified)"""
     mapping = {}
-    
 
     print("⚠️  MobileNet v3 weight mapping not fully implemented")
     return mapping

@@ -12,7 +12,6 @@ from ..quant_config import QuantizationConfig
 QuantizedTensorType = LinearQuantizedTensor
 
 class Quantizer(QuantizedOperatorBase):
-    
     def __init__(self, config: QuantizationConfig):
         super().__init__(config.momentum, config.device)
         self.config = config
@@ -61,7 +60,6 @@ class Quantizer(QuantizedOperatorBase):
 
 
 class Quantize(Quantizer):
-
     def forward(self, input: torch.Tensor) -> QuantizedTensorType:
         if self.activation_quantization:
             self.update_stats(input)
@@ -72,7 +70,6 @@ class Quantize(Quantizer):
 
 
 class QConv2dBNRelu(Quantizer):
-    
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0,
                  dilation=1, groups=1, bias=True, padding_mode='zeros', activation=None,
                  config: QuantizationConfig = None):
@@ -173,7 +170,6 @@ class QConv2dBNRelu(Quantizer):
 
 
 class QLinear(Quantizer):
-
     def __init__(self, in_features: int, out_features: int, bias: bool = True, 
                  config: QuantizationConfig = None):
         super().__init__(config)
@@ -218,7 +214,6 @@ class QLinear(Quantizer):
 
 
 class QAdd(Quantizer):
-
     def _rescale_to_common_scale(self, x: QuantizedTensorType, y: QuantizedTensorType):
         if isinstance(x, LinearQuantizedTensor) and isinstance(y, LinearQuantizedTensor):
             s = y.s
@@ -252,7 +247,6 @@ class QAdd(Quantizer):
 
 
 class QRelu(Quantizer):
-
     def forward(self, input):
         if self.activation_quantization:
             assert isinstance(input, (LinearQuantizedTensor, LogQuantizedTensor))
@@ -272,7 +266,6 @@ class QRelu(Quantizer):
 
 
 class QAdaptiveAvgPool2d(Quantizer):
-    
     def __init__(self, output_size, config: QuantizationConfig):
         super().__init__(config)
         self.output_size = output_size
@@ -296,7 +289,6 @@ class QAdaptiveAvgPool2d(Quantizer):
 
 
 class QMaxPool2d(Quantizer):
-    
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1, config: QuantizationConfig = None):
         super().__init__(config)
         self.kernel_size = kernel_size
@@ -324,7 +316,6 @@ class QMaxPool2d(Quantizer):
 
 
 class QFlatten(Quantizer):
-    
     def __init__(self, start_dim, end_dim=-1, config: QuantizationConfig = None):
         super().__init__(config)
         self.start_dim = start_dim

@@ -48,7 +48,6 @@ MODEL_TYPES = {
 }
 
 def create_model(name, config):
-    """Create model with proper config passing - matches your function signatures"""
     if name not in MODELS:
         available = list(MODELS.keys())
         raise ValueError(f"Model '{name}' not found. Available models: {available}")
@@ -57,11 +56,9 @@ def create_model(name, config):
     return model_func(config)
 
 def list_models():
-    """List all available model names"""
     return list(MODELS.keys())
 
 def get_model_type(name):
-    """Get model type (cnn, transformer, etc.)"""
     if name not in MODEL_TYPES:
         return 'unknown'
     return MODEL_TYPES[name]

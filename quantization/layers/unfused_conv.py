@@ -11,7 +11,7 @@ from ..strategies.factory import create_strategy
 from ..quant_config import QuantizationConfig
 
 from .quantized import Quantizer
-r
+
 QuantizedTensorType = Union[LinearQuantizedTensor, LogQuantizedTensor]
 
 class QConvBNUnfused(Quantizer):

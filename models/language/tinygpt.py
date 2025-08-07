@@ -286,7 +286,6 @@ class TinyGPT(nn.Module):
 
 
 def create_tiny_gpt(variant="nano", quantization_method="linear", **kwargs):
-
     
     configs = {
         "nano": {"dim": 192, "depth": 4, "num_heads": 3, "max_seq_len": 256},    # ~2M params
