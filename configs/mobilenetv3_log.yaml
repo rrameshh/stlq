@@ -4,7 +4,7 @@ data:
   num_workers: 4
 
 model:
-  name: "mobilenetv2"
+  name: "mobilenetv3"
   num_classes: 100
   img_size: 224
   pretrained: true
@@ -25,5 +25,5 @@ training:
 
 system:
   device: "cuda:0"
-  work_dir: "./output_mobilenetv2_log"
+  work_dir: "./output_mobilenetv3_log"
   seed: 42

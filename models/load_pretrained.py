@@ -596,8 +596,133 @@ def _create_mobilenetv2_mapping(custom_dict, num_classes):
             'features.18.1.num_batches_tracked': 'features.18.bn2d.num_batches_tracked',
         })
     
-    # Classifier - handle both quantized and non-quantized
     if 'classifier.linear.weight' in custom_dict:
+        mapping.update({
+            'classifier.weight': 'classifier.linear.weight',
+            'classifier.bias': 'classifier.linear.bias',
+        })
+    elif 'classifier.weight' in custom_dict:
+        mapping.update({
+            'classifier.weight': 'classifier.weight',
+            'classifier.bias': 'classifier.bias',
+        })
+    
+    print(f"Created {len(mapping)} weight mappings for MobileNet v2")
+    return mapping
+
+def _map_mobilenetv3_conv_bn(mapping, block_prefix, pretrained_conv_idx, custom_conv_idx):
+    """Helper function to map conv+bn layers for MobileNetV3"""
+    mapping.update({
+        f'{block_prefix}.conv.{pretrained_conv_idx}.0.weight': f'{block_prefix}.conv.{custom_conv_idx}.conv2d.weight',
+        f'{block_prefix}.conv.{pretrained_conv_idx}.1.weight': f'{block_prefix}.conv.{custom_conv_idx}.bn2d.weight',
+        f'{block_prefix}.conv.{pretrained_conv_idx}.1.bias': f'{block_prefix}.conv.{custom_conv_idx}.bn2d.bias',
+        f'{block_prefix}.conv.{pretrained_conv_idx}.1.running_mean': f'{block_prefix}.conv.{custom_conv_idx}.bn2d.running_mean',
+        f'{block_prefix}.conv.{pretrained_conv_idx}.1.running_var': f'{block_prefix}.conv.{custom_conv_idx}.bn2d.running_var',
+        f'{block_prefix}.conv.{pretrained_conv_idx}.1.num_batches_tracked': f'{block_prefix}.conv.{custom_conv_idx}.bn2d.num_batches_tracked',
+    })
+
+def _create_mobilenetv3_mapping(custom_dict, num_classes):
+    mapping = {}
+    
+    print("Creating MobileNet-v3 weight mapping...")
+    
+    # First conv layer (features.0)
+    mapping.update({
+        'features.0.0.weight': 'features.0.conv2d.weight',
+        'features.0.1.weight': 'features.0.bn2d.weight',
+        'features.0.1.bias': 'features.0.bn2d.bias',
+        'features.0.1.running_mean': 'features.0.bn2d.running_mean',
+        'features.0.1.running_var': 'features.0.bn2d.running_var',
+        'features.0.1.num_batches_tracked': 'features.0.bn2d.num_batches_tracked',
+    })
+    
+    
+    # Find all feature layers that are MobileNetV3 blocks
+    feature_blocks = []
+    for key in custom_dict.keys():
+        if key.startswith('features.') and '.conv.' in key and '.conv2d.weight' in key:
+            # Extract block index and conv index: features.X.conv.Y.conv2d.weight
+            parts = key.split('.')
+            if len(parts) >= 5 and parts[0] == 'features':
+                try:
+                    block_idx = int(parts[1])
+                    conv_idx = int(parts[3])
+                    feature_blocks.append((block_idx, conv_idx))
+                except ValueError:
+                    continue
+    
+    # Group by block index
+    blocks_info = {}
+    for block_idx, conv_idx in feature_blocks:
+        if block_idx not in blocks_info:
+            blocks_info[block_idx] = []
+        blocks_info[block_idx].append(conv_idx)
+    
+    # Sort and process each block
+    for block_idx in sorted(blocks_info.keys()):
+        if block_idx == 0:  # Skip first conv (already handled)
+            continue
+            
+        conv_indices = sorted(blocks_info[block_idx])
+        num_convs = len(conv_indices)
+        
+        print(f"  Block {block_idx}: {num_convs} convolutions")
+        
+        # Map based on number of convolutions in the block
+        if num_convs == 2:
+            # Block without expansion (depthwise + pointwise)
+            # Conv 0: Depthwise (3x3)
+            # Conv 1: Pointwise (1x1, no activation)
+            _map_mobilenetv3_conv_bn(mapping, f'features.{block_idx}', 0, 0)  # Depthwise
+            _map_mobilenetv3_conv_bn(mapping, f'features.{block_idx}', 1, 1)  # Pointwise
+            
+        elif num_convs == 3:
+            # Standard inverted residual block (expansion + depthwise + pointwise)
+            # Conv 0: Expansion (1x1)
+            # Conv 1: Depthwise (3x3) 
+            # Conv 2: Pointwise (1x1, no activation)
+            _map_mobilenetv3_conv_bn(mapping, f'features.{block_idx}', 0, 0)  # Expansion
+            _map_mobilenetv3_conv_bn(mapping, f'features.{block_idx}', 1, 1)  # Depthwise
+            _map_mobilenetv3_conv_bn(mapping, f'features.{block_idx}', 2, 2)  # Pointwise
+            
+        # Handle SE (Squeeze-and-Excitation) modules if present
+        se_fc1_key = f'features.{block_idx}.conv.se.fc1.linear.weight'
+        se_fc2_key = f'features.{block_idx}.conv.se.fc2.linear.weight'
+        
+        if se_fc1_key in custom_dict:
+            # Map SE module weights
+            mapping.update({
+                f'features.{block_idx}.squeeze_excite.fc1.weight': f'features.{block_idx}.conv.se.fc1.linear.weight',
+                f'features.{block_idx}.squeeze_excite.fc1.bias': f'features.{block_idx}.conv.se.fc1.linear.bias',
+                f'features.{block_idx}.squeeze_excite.fc2.weight': f'features.{block_idx}.conv.se.fc2.linear.weight',
+                f'features.{block_idx}.squeeze_excite.fc2.bias': f'features.{block_idx}.conv.se.fc2.linear.bias',
+            })
+    
+    # Last conv layer (usually the highest numbered feature)
+    max_feature_idx = max(int(k.split('.')[1]) for k in custom_dict.keys() 
+                         if k.startswith('features.') and '.conv2d.weight' in k and 'conv.' not in k)
+    
+    if f'features.{max_feature_idx}.conv2d.weight' in custom_dict:
+        mapping.update({
+            f'features.{max_feature_idx}.0.weight': f'features.{max_feature_idx}.conv2d.weight',
+            f'features.{max_feature_idx}.1.weight': f'features.{max_feature_idx}.bn2d.weight',
+            f'features.{max_feature_idx}.1.bias': f'features.{max_feature_idx}.bn2d.bias',
+            f'features.{max_feature_idx}.1.running_mean': f'features.{max_feature_idx}.bn2d.running_mean',
+            f'features.{max_feature_idx}.1.running_var': f'features.{max_feature_idx}.bn2d.running_var',
+            f'features.{max_feature_idx}.1.num_batches_tracked': f'features.{max_feature_idx}.bn2d.num_batches_tracked',
+        })
+    
+    # Classifier layers
+    # MobileNetV3-Large has a pre-classifier layer, V3-Small doesn't
+    if 'pre_classifier.linear.weight' in custom_dict:
+        # V3-Large with pre-classifier
+        mapping.update({
+            'classifier.0.weight': 'pre_classifier.linear.weight',
+            'classifier.0.bias': 'pre_classifier.linear.bias',
+            'classifier.3.weight': 'classifier.linear.weight',
+            'classifier.3.bias': 'classifier.linear.bias',
+        })
+    elif 'classifier.linear.weight' in custom_dict:
         # Quantized classifier
         mapping.update({
             'classifier.weight': 'classifier.linear.weight',
@@ -610,17 +735,15 @@ def _create_mobilenetv2_mapping(custom_dict, num_classes):
             'classifier.bias': 'classifier.bias',
         })
     
-    print(f"Created {len(mapping)} weight mappings for MobileNet v2")
+    print(f"Created {len(mapping)} weight mappings for MobileNet v3")
+    
+    # Debug: Print some sample mappings
+    print("Sample mappings:")
+    for i, (pretrained_key, custom_key) in enumerate(mapping.items()):
+        if i < 5:
+            print(f"  {pretrained_key} -> {custom_key}")
+    
     return mapping
-
-
-def _create_mobilenetv3_mapping(custom_dict, num_classes):
-    """Create weight mapping for MobileNet v3 (simplified)"""
-    mapping = {}
-
-    print("⚠️  MobileNet v3 weight mapping not fully implemented")
-    return mapping
-
 
 
 # ViT variants

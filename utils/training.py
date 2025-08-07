@@ -49,6 +49,7 @@ def train_epoch(
         deit_loss_fn = DeiTLoss(distillation_alpha=0.5, distillation_tau=3.0)
         print(f"Using DeiT distillation loss (alpha=0.5, tau=3.0)")
     
+    # accumulated_loss = 0.0
     for i, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(model.device), targets.to(model.device)
         
@@ -83,9 +84,21 @@ def train_epoch(
         else:
             loss = F.cross_entropy(outputs, targets)
             outputs_for_metrics = outputs
+
+        # loss = loss / 8
+        # accumulated_loss += loss.item()
+
+        
         
         loss.backward()
         optimizer.step()
+        # if (i + 1) % 8 == 0:
+        #     optimizer.step()
+        #     optimizer.zero_grad()
+            
+        #     # Update metrics with accumulated loss
+        #     metrics.update(accumulated_loss, outputs_for_metrics, targets)
+        #     accumulated_loss = 0.0
         
         metrics.update(loss.item(), outputs_for_metrics, targets)
         

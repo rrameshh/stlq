@@ -8,7 +8,7 @@ A flexible and extensible Quantization-Aware Training (QAT) framework for PyTorc
 
 ## Overview
 
-This framework provides a comprehensive solution for quantization-aware training, enabling researchers and practitioners to train quantized neural networks with minimal code changes. It supports both traditional linear quantization and novel logarithmic quantization methods, with built-in support for popular model architectures.
+This framework allows for the training of quantized neural networks with minimal code changes. It supports both traditional linear quantization and selective-two word logarithmic quantization methods, with built-in support for popular model architectures.
 
 ### Key Features
 
