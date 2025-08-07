@@ -93,8 +93,8 @@ class Trainer:
             print(f"Epoch {epoch+1}/{self.config.training.num_epochs} "
                   f"({epoch_time:.1f}s) - Val Acc: {val_accuracy:.2f}% "
                   f"(Best: {self.best_metric:.2f}%) - "
-                  f"LR: {self.scheduler.get_last_lr()[0]:.6f} - "
-                  f"Quantization: {'ON' if hook_status['switched'] else 'OFF'}")
+                  f"LR: {self.scheduler.get_last_lr()[0]:.6f} - ")
+                #   f"Quantization: {'ON' if hook_status['switched'] else 'OFF'}")
             
             if self.patience_counter >= self.config.training.early_stop_patience:
                 print(f"Early stopping after {epoch+1} epochs")

@@ -1,5 +1,3 @@
-# models/pretrained.py - Single pretrained loading module
-
 import torch
 import torchvision.models as models
 import timm
@@ -65,23 +63,28 @@ def _extract_variant(model_name: str) -> str:
     }
     
     return variant_map.get(model_name, model_name.split('_')[-1])
-
 def load_pretrained_weights(model, model_name: str, **kwargs):
     model_type = _get_model_type(model_name)
-
     if model_type == 'language':
         print(f"No pretrained weights available for {model_name} (language model)")
         return model
-    
     if model_type not in PRETRAINED_LOADERS:
         print(f"No pretrained loader available for model type: {model_type}")
         return model
     
     loader_func = PRETRAINED_LOADERS[model_type]
     variant = _extract_variant(model_name)
-    loading_kwargs = {
-        'num_classes': kwargs.get('num_classes', 1000),
-        'img_size': kwargs.get('img_size', 224),
-    }
     
-    return loader_func(model, variant=variant, **loading_kwargs)
+    if model_type in ['vit', 'deit', 'swin']:
+        return loader_func(
+            model,
+            variant=variant,
+            num_classes=kwargs.get('num_classes', 1000),
+            img_size=kwargs.get('img_size', 224)
+        )
+    else:
+        return loader_func(
+            model,
+            variant=variant,
+            num_classes=kwargs.get('num_classes', 1000)
+        )

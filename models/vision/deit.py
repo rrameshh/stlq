@@ -146,7 +146,7 @@ class DeiT(ViT):
             with torch.no_grad():
                 teacher_logits = self.teacher_model(original_input)
         
-        if self.training:
+        if self.training and teacher_logits is not None:
             # Training: return all logits for distillation loss
             return cls_logits, dist_logits, teacher_logits
         else:
@@ -204,8 +204,24 @@ class DeiTLoss(nn.Module):
             'soft_loss': soft_loss
         }
 
-def deit_tiny(main_config, **kwargs):
-    
+
+def create_teacher_model(main_config):
+    teacher_model = None
+    if getattr(main_config.model, 'use_teacher', True):
+        print("Creating teacher model for DeiT distillation...")
+        try:
+            import torchvision.models as models
+            teacher_model = models.resnet50(pretrained=True)
+            teacher_model.fc = torch.nn.Linear(teacher_model.fc.in_features, main_config.model.num_classes)
+            teacher_model = teacher_model.to(main_config.system.device)
+            teacher_model.eval()
+            print("Teacher model (ResNet-50) created successfully")
+        except Exception as e:
+            print(f"Warning: Could not create teacher model: {e}")
+            teacher_model = None
+    return teacher_model
+
+def _create_deit_variant(main_config, embed_dim, depth, num_heads, **kwargs):
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
@@ -215,46 +231,25 @@ def deit_tiny(main_config, **kwargs):
     )
     config.quantize_classifier = False
     
+    teacher_model = create_teacher_model(main_config)
+    
     return DeiT(
-        embed_dim=192, depth=12, num_heads=3,  # tiny config hardcoded
+        embed_dim=embed_dim, 
+        depth=depth, 
+        num_heads=num_heads,
         config=config,
         num_classes=main_config.model.num_classes,
         img_size=main_config.model.img_size,
+        teacher_model=teacher_model,
         **kwargs
     )
 
+# Now your variant functions are super simple:
+def deit_tiny(main_config, **kwargs):
+    return _create_deit_variant(main_config, embed_dim=192, depth=12, num_heads=3, **kwargs)
+
 def deit_small(main_config, **kwargs):
-    config = QuantizationConfig(
-        method=main_config.quantization.method,
-        momentum=main_config.quantization.momentum,
-        device=main_config.system.device,
-        threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
-    )
-    config.quantize_classifier = False
-    
-    return DeiT(
-        embed_dim=384, depth=12, num_heads=6,  # tiny config hardcoded
-        config=config,
-        num_classes=main_config.model.num_classes,
-        img_size=main_config.model.img_size,
-        **kwargs
-    )
+    return _create_deit_variant(main_config, embed_dim=384, depth=12, num_heads=6, **kwargs)
     
 def deit_base(main_config, **kwargs):
-    config = QuantizationConfig(
-        method=main_config.quantization.method,
-        momentum=main_config.quantization.momentum,
-        device=main_config.system.device,
-        threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
-    )
-    config.quantize_classifier = False
-    
-    return DeiT(
-        embed_dim=768, depth=12, num_heads=12,  # tiny config hardcoded
-        config=config,
-        num_classes=main_config.model.num_classes,
-        img_size=main_config.model.img_size,
-        **kwargs
-    )
+    return _create_deit_variant(main_config, embed_dim=768, depth=12, num_heads=12, **kwargs)

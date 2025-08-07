@@ -4,14 +4,12 @@ from typing import Optional
 class SwitchQuantizationModeHook:
 
     def __init__(self, model, switch_iteration: int = 5000):
-
         self.model = model
         self.switch_iteration = switch_iteration
         self.switched = False
         self.current_iteration = 0
     
     def after_train_iter(self, iteration: int) -> bool:
-
         self.current_iteration = iteration
         
         if not self.switched and iteration >= self.switch_iteration:

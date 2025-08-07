@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Tuple, Optional
 from torch.utils.tensorboard import SummaryWriter
 
+
 class TrainingMetrics:
     
     def __init__(self):
@@ -30,7 +31,6 @@ class TrainingMetrics:
     def avg_loss(self) -> float:
         return self.running_loss / self.batch_count if self.batch_count > 0 else 0.0
 
-
 def train_epoch(
     model, 
     train_loader, 
@@ -40,40 +40,59 @@ def train_epoch(
     writer: SummaryWriter,
     log_interval: int = 100
 ) -> Dict[str, float]:
-    """
-    Train model for one epoch.
-    
-    Args:
-        model: Model to train
-        train_loader: Training data loader
-        optimizer: Optimizer
-        epoch: Current epoch number
-        switch_hook: Hook for switching quantization mode
-        writer: TensorBoard writer
-        log_interval: How often to log progress (in batches)
-        
-    Returns:
-        Dictionary with training metrics
-    """
     model.train()
     metrics = TrainingMetrics()
+
+    deit_loss_fn = None
+    if hasattr(model, 'teacher_model') and model.teacher_model is not None:
+        from models.vision.deit import DeiTLoss  # Import here to avoid circular imports
+        deit_loss_fn = DeiTLoss(distillation_alpha=0.5, distillation_tau=3.0)
+        print(f"Using DeiT distillation loss (alpha=0.5, tau=3.0)")
     
     for i, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(model.device), targets.to(model.device)
         
         optimizer.zero_grad()
         outputs = model(inputs)
-        loss = F.cross_entropy(outputs, targets)
+        
+        if isinstance(outputs, tuple) and len(outputs) == 3 and deit_loss_fn is not None:
+            loss_dict = deit_loss_fn(outputs, targets)
+            loss = loss_dict['total_loss']
+
+            cls_logits, dist_logits, _ = outputs
+            averaged_logits = (cls_logits + dist_logits) / 2
+            outputs_for_metrics = averaged_logits
+            
+            if (i + 1) % log_interval == 0:
+                print(f"  Distillation - Hard: {loss_dict['hard_loss']:.4f}, "
+                      f"Soft: {loss_dict['soft_loss']:.4f}, "
+                      f"Total: {loss_dict['total_loss']:.4f}")
+        
+        elif isinstance(outputs, tuple):
+            if len(outputs) == 2:
+                # Two outputs (e.g., cls_logits, dist_logits)
+                cls_logits, dist_logits = outputs
+                averaged_logits = (cls_logits + dist_logits) / 2
+            elif len(outputs) >= 1:
+                averaged_logits = outputs[0]
+            else:
+                raise ValueError(f"Unexpected output format: {len(outputs)} outputs")
+                
+            loss = F.cross_entropy(averaged_logits, targets)
+            outputs_for_metrics = averaged_logits
+        else:
+            loss = F.cross_entropy(outputs, targets)
+            outputs_for_metrics = outputs
+        
         loss.backward()
         optimizer.step()
         
-        metrics.update(loss.item(), outputs, targets)
-
-        iteration = epoch * len(train_loader) + i
-        if switch_hook.after_train_iter(iteration):
-            print("Switched to activation quantization")
+        metrics.update(loss.item(), outputs_for_metrics, targets)
         
-        # Log progress periodically
+        iteration = epoch * len(train_loader) + i
+        # if switch_hook.after_train_iter(iteration):
+        #     print("Switched to activation quantization mode")
+        
         if (i + 1) % log_interval == 0:
             _log_training_progress(epoch, i, len(train_loader), metrics, writer, iteration)
             metrics.reset()
@@ -82,6 +101,7 @@ def train_epoch(
         "loss": metrics.avg_loss,
         "accuracy": metrics.accuracy
     }
+    
 
 
 def validate(model, test_loader, epoch: int, writer: SummaryWriter) -> float:
