@@ -90,9 +90,22 @@ class Trainer:
                 print(f"\n{'='*60}")
                 print(f"APPLYING SPARSIFICATION AT EPOCH {epoch}")
                 print(f"{'='*60}")
+
+
+            if (self.sparsifier and 
+                epoch == self.config.sparsification.apply_after_epoch and 
+                not hasattr(self.model, '_sparsified')):
                 
+                print(f"\n{'='*60}")
+                print(f"APPLYING SPARSIFICATION AT EPOCH {epoch}")
+                print(f"{'='*60}")
+
                 try:
-                    # Apply sparsification
+                    # Collect activation statistics first
+                    if hasattr(self.sparsifier, 'collect_activation_statistics'):
+                        self.sparsifier.collect_activation_statistics(self.model, self.train_loader)
+                    
+                    # Apply sparsification ONCE
                     sparsification_results = self.sparsifier.apply(
                         self.model, 
                         self.config.sparsification.target_ratio
@@ -120,10 +133,8 @@ class Trainer:
                     self.writer.add_scalar('Sparsification/TargetSparsity', self.config.sparsification.target_ratio, epoch)
                     
                     # Log method-specific metrics
-                    if 'cost_threshold' in sparsification_results:
-                        self.writer.add_scalar('Sparsification/CostThreshold', sparsification_results['cost_threshold'], epoch)
-                    if 'cost_penalty' in sparsification_results:
-                        self.writer.add_scalar('Sparsification/CostPenalty', sparsification_results['cost_penalty'], epoch)
+                    if 'threshold' in sparsification_results:
+                        self.writer.add_scalar('Sparsification/Threshold', sparsification_results['threshold'], epoch)
                     
                     # Mark as sparsified
                     self.model._sparsified = True

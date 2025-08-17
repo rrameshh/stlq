@@ -12,6 +12,23 @@ class AdaptiveLogStrategy(QuantizationStrategy):
         super().__init__(config)
         self.target_second_word_ratio = getattr(config, 'target_second_word_ratio', 0.25)  # 25% default
         self.adaptive_threshold = getattr(config, 'adaptive_threshold', True)
+
+        self.adjusted_target = self.target_second_word_ratio  # Initialize to original target
+        self.sparsity_context = None
+
+    def set_sparsity_context(self, sparsity_ratio):
+        """Adjust quantization targets based on sparsity"""
+        if sparsity_ratio > 0:
+            # With sparsity, remaining weights need higher precision
+            density = 1.0 - sparsity_ratio
+            self.adjusted_target = min(0.9, self.target_second_word_ratio / density)
+            print(f"Adjusted second-word target: {self.target_second_word_ratio:.3f} → {self.adjusted_target:.3f}")
+        else:
+            self.adjusted_target = self.target_second_word_ratio
+
+    def get_current_target(self):
+        """Get the current target (adjusted or original)"""
+        return getattr(self, 'adjusted_target', self.target_second_word_ratio)
        
     def quantize_weight(self, weight: torch.Tensor, per_channel: bool = True):
         """Quantize weights with adaptive thresholds - treats ALL weights normally"""
@@ -62,7 +79,8 @@ class AdaptiveLogStrategy(QuantizationStrategy):
             
             if valid_errors.numel() > 0:
                 # Use quantile to set threshold for target ratio
-                quantile_level = 1.0 - self.target_second_word_ratio
+                # quantile_level = 1.0 - self.target_second_word_ratio
+                quantile_level = 1.0 - self.get_current_target()
                 adaptive_threshold = torch.quantile(valid_errors, quantile_level)
                 
                 # Ensure threshold is reasonable (not too small)
@@ -147,7 +165,8 @@ class AdaptiveLogStrategy(QuantizationStrategy):
             valid_errors = err_mag  # All errors are valid
             
             if valid_errors.numel() > 0:
-                quantile_level = 1.0 - self.target_second_word_ratio
+                # quantile_level = 1.0 - self.target_second_word_ratio
+                quantile_level = 1.0 - self.get_current_target()
                 adaptive_threshold = torch.quantile(valid_errors, quantile_level)
                 adaptive_threshold = torch.maximum(
                     adaptive_threshold, 

@@ -24,6 +24,54 @@ class DynamicCoEvolutionSparsification:
     def get_name(self) -> str:
         return "dynamic_coevolution"
     
+    def collect_activation_statistics(self, model, data_loader):
+        """Collect activation statistics before sparsification"""
+        print("Collecting activation statistics...")
+        
+        activation_stats = {}
+        
+        def make_hook(name):
+            def hook(module, input, output):
+                if name not in activation_stats:
+                    activation_stats[name] = []
+                
+                # Compute mean absolute activation
+                if isinstance(input, tuple) and len(input) > 0:
+                    mean_abs = torch.mean(torch.abs(input[0])).item()
+                    activation_stats[name].append(mean_abs)
+            return hook
+        
+        # Register hooks only for quantizable layers
+        handles = []
+        for name, module in model.named_modules():
+            if hasattr(module, 'strategy') and (hasattr(module, 'linear') or hasattr(module, 'conv2d')):
+                handle = module.register_forward_hook(make_hook(name))
+                handles.append(handle)
+        
+        # Collect statistics with a few batches
+        model.eval()
+        with torch.no_grad():
+            for i, (inputs, _) in enumerate(data_loader):
+                if i >= 10:  # Only need a few batches
+                    break
+                inputs = inputs.to(model.device)
+                _ = model(inputs)
+        
+        # Clean up hooks
+        for handle in handles:
+            handle.remove()
+        
+        # Process statistics
+        processed_stats = {}
+        for name, values in activation_stats.items():
+            processed_stats[name] = {
+                'mean_abs_activations': sum(values) / len(values) if values else 1.0
+            }
+        
+        self.activation_stats = processed_stats
+        print(f"Collected stats for {len(processed_stats)} layers")
+        return processed_stats
+    
     def apply(self, model: nn.Module, target_sparsity: float) -> Dict[str, Any]:
         """
         Main entry point - called once when sparsification epoch is reached
@@ -136,7 +184,13 @@ class DynamicCoEvolutionSparsification:
         
         # Convert to tensor and compute quantile
         cost_tensor = torch.tensor(cost_samples, dtype=torch.float32)
-        threshold = torch.quantile(cost_tensor, target_sparsity)
+        threshold = torch.quantile(cost_tensor, 1.0 - target_sparsity)
+
+        print(f"   Cost distribution:")
+        print(f"     Min: {cost_tensor.min():.1f}")
+        print(f"     Max: {cost_tensor.max():.1f}")  
+        print(f"     Mean: {cost_tensor.mean():.1f}")
+        print(f"     {target_sparsity:.1%} quantile: {threshold:.1f}")
         
         print(f"   Global threshold: {threshold:.1f}")
         
@@ -270,27 +324,36 @@ class DynamicCoEvolutionSparsification:
                       f"(eff: {efficiency:.1f})")
     
     def _compute_quantization_cost(self, module, weight):
-        """Compute quantization cost using current targets"""
+        """Enhanced to consider activation statistics"""
         try:
             strategy = getattr(module, 'strategy', None)
             if not strategy:
                 return 1.0 / (torch.abs(weight.data) + 1e-8)
             
-            # Get quantization with current adaptive target
+            # NEW: Get activation statistics for this layer
+            layer_name = self._get_layer_name(module)  
+            activation_stats = getattr(self, 'activation_stats', {})
+            
+            if layer_name in activation_stats:
+                # Weight quantization cost by expected activation magnitude
+                mean_activation = activation_stats[layer_name]['mean_abs_activations']
+                activation_weight = torch.full_like(weight.data, mean_activation)
+            else:
+                activation_weight = torch.ones_like(weight.data)
+            
+            # Your existing quantization analysis
             quantized = strategy.quantize_weight(weight, per_channel=True)
             
-            if hasattr(quantized, 'second_word_mask') and quantized.second_word_mask is not None:
-                sw_mask = quantized.second_word_mask
-                magnitude = torch.abs(weight.data)
+            if hasattr(quantized, 'second_word_mask'):
+                sw_mask = quantized.second_word_mask.float()
+                cost = torch.where(sw_mask > 0, 3.0, 1.0)
                 
-                # Cost: higher for second-word weights, inversely related to magnitude
-                cost = torch.ones_like(weight.data, dtype=torch.float32)
-                cost[sw_mask] = 3.0  # Second word penalty
-                cost[~sw_mask] = 1.0  # Single word
-                
-                return cost / (magnitude + 1e-6)
+                # NEW: Weight by activation impact
+                return cost * activation_weight / (torch.abs(weight.data) + 1e-6)
             else:
-                return 1.0 / (torch.abs(weight.data) + 1e-8)
+                dequantized = quantized.dequantize() if hasattr(quantized, 'dequantize') else quantized
+                error = torch.abs(weight.data - dequantized)
+                return error * activation_weight
                 
         except Exception as e:
             return 1.0 / (torch.abs(weight.data) + 1e-8)
