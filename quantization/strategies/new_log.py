@@ -83,7 +83,6 @@ class LogStrategy(QuantizationStrategy):
             s_err[second_word_mask] = s_err_selected
 
         result =  LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
-        result = LogQuantizedTensor(q1, a.squeeze(), s, q2, s_err, second_word_mask)
     
         return result
 
@@ -99,12 +98,14 @@ class LogStrategy(QuantizationStrategy):
         
         max_value = (2 ** config.bits) - 1
         
-        q1 = torch.zeros_like(weight, dtype=torch.uint8)
+        # q1 = torch.zeros_like(weight, dtype=torch.uint8)
+        q1 = torch.zeros_like(weight, dtype=torch.uint16)
         if torch.any(non_zero_mask):
             normalized = torch.abs(weight[non_zero_mask]) / a
             q1_non_zero = -torch.log2(normalized)
             q1_non_zero = torch.clamp((q1_non_zero.round()), 0, max_value)
-            q1[non_zero_mask] = q1_non_zero.to(torch.uint8)
+            q1[non_zero_mask] = q1_non_zero
+            # .to(torch.uint)
         
 
         normalized_weight = weight / a
@@ -128,7 +129,8 @@ class LogStrategy(QuantizationStrategy):
 
             selected_err_mag = torch.abs(sel_err)
             q2_selected = -torch.log2(selected_err_mag)
-            q2_selected = torch.clamp((q2_selected.round()), 2, max_value + 2).to(torch.uint8)
+            q2_selected = torch.clamp((q2_selected.round()), 2, max_value + 2)
+            # .to(torch.uint8)
             q2[second_word_mask] = q2_selected
             s_err[second_word_mask] = s_err_selected
 

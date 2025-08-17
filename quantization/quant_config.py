@@ -4,9 +4,11 @@ import torch
 
 @dataclass
 class QuantizationConfig:
-    method: str = "linear"  # "linear", "log"
+    method: str = "linear"  # "linear", "log", "adaptive_log"
     momentum: float = 0.1
     device: Optional[torch.device] = None
+    adaptive_threshold: bool = False
+    target_second_word_ratio: float = 0.25
     
     bits: int = 8
     
@@ -15,7 +17,7 @@ class QuantizationConfig:
     
     def __post_init__(self):
         """Validate and set defaults after initialization"""
-        if self.method not in ["linear", "log"]:
+        if self.method not in ["linear", "log", "adaptive_log"]:
             raise ValueError(f"Unknown method: {self.method}")
         
         if self.device is None:

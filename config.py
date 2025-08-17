@@ -45,12 +45,43 @@ class QuantizationConfig:
     threshold: float = 1e-5
     eps: float = 1e-8
     switch_iteration: int = 5000
+    adaptive_threshold: bool = False
+    target_second_word_ratio: float = 0.25
     
     def __post_init__(self):
-        if self.method not in ["linear", "log"]:
+        if self.method not in ["linear", "log", "adaptive_log"]:
             raise ValueError(f"Invalid quantization method '{self.method}'. Valid: ['linear', 'log']")
         if self.bits not in [4, 8, 16]:
             print(f"Warning: Unusual bit width {self.bits}. Common values: [4, 8, 16]")
+
+@dataclass
+class SparsificationConfig:
+    enabled: bool = False
+    method: str = "quantization_informed_progressive"
+    target_ratio: float = 0.5  # Target sparsity ratio
+    
+    # Progressive joint optimization settings
+    cost_penalty: int = 1.0
+
+    adaptation_interval: int = 5      # Adapt every N epochs
+    initial_sw_target: float = 0.25   # Starting point (will be diversified)
+    sw_learning_rate: float = 0.1     # How fast to adapt
+    efficiency_threshold: float = 200.0  # Efficiency target
+    
+    
+    # Training schedule
+    apply_after_epoch: int = 50  # Apply sparsification after this epoch
+    
+    # Baseline methods for comparison
+    baseline_method: str = "magnitude"  # "magnitude", "snip" for comparison
+    
+    def __post_init__(self):
+        if self.enabled:
+            if not 0.0 < self.target_ratio < 1.0:
+                raise ValueError(f"target_ratio must be between 0 and 1, got {self.target_ratio}")
+            # if abs(self.complexity_weight + self.magnitude_weight - 1.0) > 0.1:
+            #     print(f"Warning: α + β = {self.complexity_weight + self.magnitude_weight:.2f}, should sum to ~1.0")
+
 
 @dataclass
 class TrainingConfig:
@@ -74,6 +105,7 @@ class Config:
     quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
+    sparsification: SparsificationConfig = field(default_factory=SparsificationConfig)  # Add this line 
     
     def __post_init__(self):
         """Auto-adjust related settings."""
@@ -83,7 +115,12 @@ class Config:
         
         # Auto-adjust work_dir based on quantization method
         if self.system.work_dir == "./output":
+            suffix = f"_{self.quantization.method}"  # Initialize suffix here
             self.system.work_dir = f"./output_{self.quantization.method}"
+            if self.sparsification.enabled:  # Add this block
+                suffix += f"_sparse{int(self.sparsification.target_ratio*100)}"
+
+
         
         # Validate device
         if "cuda" in self.system.device and not torch.cuda.is_available():
@@ -98,8 +135,8 @@ class Config:
         
         config = cls()
         
-        # Update each section
-        for section_name in ['data', 'model', 'quantization', 'training', 'system']:
+
+        for section_name in ['data', 'model', 'quantization', 'training', 'system', 'sparsification']:
             if section_name in data:
                 section = getattr(config, section_name)
                 for key, value in data[section_name].items():
@@ -108,12 +145,13 @@ class Config:
                     else:
                         print(f"Warning: Unknown config key '{section_name}.{key}' ignored")
         
-        # Re-run post-init for validation
+
         config.__post_init__()
         return config
     
     def save_yaml(self, path: Path):
         """Save config to YAML."""
+
         path.parent.mkdir(parents=True, exist_ok=True)
         
         data = {
@@ -122,10 +160,12 @@ class Config:
             'quantization': self.quantization.__dict__,
             'training': self.training.__dict__,
             'system': self.system.__dict__,
+            'sparsification': self.sparsification.__dict__,
         }
         
         with open(path, 'w') as f:
             yaml.dump(data, f, default_flow_style=False)
+
     
     def print_summary(self):
         """Print clean config summary."""
@@ -135,7 +175,15 @@ class Config:
         print(f"Dataset: {self.data.dataset} (classes: {self.model.num_classes})")
         print(f"Model: {self.model.name} {'(pretrained)' if self.model.pretrained else ''}")
         print(f"Quantization: {self.quantization.method} ({self.quantization.bits}-bit)")
+        print(self.sparsification)
+        if self.sparsification.enabled:
+            print(f"Sparsification: {self.sparsification.method} ({self.sparsification.target_ratio:.1%} target)")
+            print(f"  - Apply after epoch: {self.sparsification.apply_after_epoch}")
+  
+        else:
+            print("Sparsification: Disabled")
         print(f"Training: {self.training.num_epochs} epochs @ LR {self.training.lr}")
         print(f"Device: {self.system.device}")
         print(f"Output: {self.system.work_dir}")
+
         print("=" * 60)

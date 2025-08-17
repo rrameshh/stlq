@@ -31,6 +31,7 @@ class TrainingMetrics:
     def avg_loss(self) -> float:
         return self.running_loss / self.batch_count if self.batch_count > 0 else 0.0
 
+
 def train_epoch(
     model, 
     train_loader, 
@@ -38,24 +39,40 @@ def train_epoch(
     epoch: int, 
     switch_hook, 
     writer: SummaryWriter,
-    log_interval: int = 100
+    log_interval: int = 100,
+    accumulation_steps: int = 4 
 ) -> Dict[str, float]:
+    """
+    Training with gradient accumulation.
+    
+    Args:
+        accumulation_steps: Number of forward passes before optimizer.step()
+                          For batch_size=32 with accumulation_steps=2, 
+                          effective batch size = 32 * 2 = 64
+    """
     model.train()
     metrics = TrainingMetrics()
 
     deit_loss_fn = None
     if hasattr(model, 'teacher_model') and model.teacher_model is not None:
-        from models.vision.deit import DeiTLoss  # Import here to avoid circular imports
+        from models.vision.deit import DeiTLoss
         deit_loss_fn = DeiTLoss(distillation_alpha=0.5, distillation_tau=3.0)
         print(f"Using DeiT distillation loss (alpha=0.5, tau=3.0)")
     
-    # accumulated_loss = 0.0
+    print(f"Training with gradient accumulation: steps={accumulation_steps}, "
+          f"effective batch size={train_loader.batch_size * accumulation_steps}")
+    
+    accumulated_loss = 0.0
+    accumulated_outputs = []
+    accumulated_targets = []
+    
     for i, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(model.device), targets.to(model.device)
         
-        optimizer.zero_grad()
+        # Forward pass
         outputs = model(inputs)
         
+        # Compute loss
         if isinstance(outputs, tuple) and len(outputs) == 3 and deit_loss_fn is not None:
             loss_dict = deit_loss_fn(outputs, targets)
             loss = loss_dict['total_loss']
@@ -64,14 +81,13 @@ def train_epoch(
             averaged_logits = (cls_logits + dist_logits) / 2
             outputs_for_metrics = averaged_logits
             
-            if (i + 1) % log_interval == 0:
+            if (i + 1) % (log_interval * accumulation_steps) == 0:
                 print(f"  Distillation - Hard: {loss_dict['hard_loss']:.4f}, "
                       f"Soft: {loss_dict['soft_loss']:.4f}, "
                       f"Total: {loss_dict['total_loss']:.4f}")
         
         elif isinstance(outputs, tuple):
             if len(outputs) == 2:
-                # Two outputs (e.g., cls_logits, dist_logits)
                 cls_logits, dist_logits = outputs
                 averaged_logits = (cls_logits + dist_logits) / 2
             elif len(outputs) >= 1:
@@ -85,36 +101,56 @@ def train_epoch(
             loss = F.cross_entropy(outputs, targets)
             outputs_for_metrics = outputs
 
-        # loss = loss / 8
-        # accumulated_loss += loss.item()
-
+        # Scale loss by accumulation steps
+        loss = loss / accumulation_steps
         
-        
+        # Backward pass
         loss.backward()
-        optimizer.step()
-        # if (i + 1) % 8 == 0:
-        #     optimizer.step()
-        #     optimizer.zero_grad()
+        
+        # Accumulate for metrics
+        accumulated_loss += loss.item()
+        accumulated_outputs.append(outputs_for_metrics.detach())
+        accumulated_targets.append(targets.detach())
+        
+        # Update weights every accumulation_steps
+        if (i + 1) % accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
             
-        #     # Update metrics with accumulated loss
-        #     metrics.update(accumulated_loss, outputs_for_metrics, targets)
-        #     accumulated_loss = 0.0
+            # Update metrics with accumulated results
+            combined_outputs = torch.cat(accumulated_outputs, dim=0)
+            combined_targets = torch.cat(accumulated_targets, dim=0)
+            metrics.update(accumulated_loss, combined_outputs, combined_targets)
+            
+            # Reset accumulators
+            accumulated_loss = 0.0
+            accumulated_outputs = []
+            accumulated_targets = []
+            
+            # Check quantization switch
+            iteration = epoch * len(train_loader) + i
+            # if switch_hook.after_train_iter(iteration):
+            #     print("Switched to activation quantization mode")
         
-        metrics.update(loss.item(), outputs_for_metrics, targets)
-        
-        iteration = epoch * len(train_loader) + i
-        # if switch_hook.after_train_iter(iteration):
-        #     print("Switched to activation quantization mode")
-        
-        if (i + 1) % log_interval == 0:
+        # Logging (adjust frequency for accumulation)
+        if (i + 1) % (log_interval * accumulation_steps) == 0:
+            iteration = epoch * len(train_loader) + i
             _log_training_progress(epoch, i, len(train_loader), metrics, writer, iteration)
             metrics.reset()
+    
+    # Handle remaining accumulated gradients (if batch count not divisible by accumulation_steps)
+    if len(accumulated_outputs) > 0:
+        optimizer.step()
+        optimizer.zero_grad()
+        
+        combined_outputs = torch.cat(accumulated_outputs, dim=0)
+        combined_targets = torch.cat(accumulated_targets, dim=0)
+        metrics.update(accumulated_loss, combined_outputs, combined_targets)
     
     return {
         "loss": metrics.avg_loss,
         "accuracy": metrics.accuracy
     }
-    
 
 
 def validate(model, test_loader, epoch: int, writer: SummaryWriter) -> float:
@@ -182,12 +218,6 @@ def save_checkpoint(
         'accuracy': accuracy,
         'epoch': epoch,
     }
-    
-    # Path(save_dir).mkdir(parents=True, exist_ok=True)
-    
-    # # Save regular checkpoint
-    # checkpoint_path = f'{save_dir}/checkpoint_epoch{epoch+1}.pth'
-    # torch.save(state, checkpoint_path)
     
     # Save best model separately
     if is_best:

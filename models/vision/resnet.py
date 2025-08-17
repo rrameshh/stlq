@@ -12,6 +12,7 @@ from quantization.layers.quantized import (
     QAdaptiveAvgPool2d,
     QFlatten
 )
+from quantization.layers.unfused_conv import QConvBNUnfused
 from quantization.quant_config import QuantizationConfig
 
 
@@ -23,6 +24,11 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1,
         padding=dilation, groups=groups, bias=False, dilation=dilation,
         activation=activation, config=config
     )
+    # return QConvBNUnfused(
+    #     in_planes, out_planes, kernel_size=3, stride=stride,
+    #     padding=dilation, groups=groups, bias=False, dilation=dilation,
+    #     activation=activation, config=config
+    # )
 
 
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1, activation=None,

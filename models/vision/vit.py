@@ -469,6 +469,8 @@ def vit_tiny(main_config, **kwargs):
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
@@ -488,6 +490,8 @@ def vit_small(main_config, **kwargs):
     config = QuantizationConfig(
         method=main_config.quantization.method,
         momentum=main_config.quantization.momentum,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
@@ -506,6 +510,8 @@ def vit_base(main_config, **kwargs):
     """ViT-Base - takes main config"""
     config = QuantizationConfig(
         method=main_config.quantization.method,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
@@ -525,6 +531,8 @@ def vit_large(main_config, **kwargs):
     """ViT-Large - takes main config"""  
     config = QuantizationConfig(
         method=main_config.quantization.method,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
