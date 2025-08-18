@@ -6,6 +6,9 @@ from .vision.deit import deit_tiny, deit_small, deit_base
 from .vision.mobilenet import mobilenetv1, mobilenetv2
 from .vision.mobilenetv3 import mobilenetv3_large, mobilenetv3_small
 
+from .language.tinygpt import tinygpt_nano, tinygpt_micro, tinygpt_mini, tinygpt_small
+from .language.tinybert import tinybert_tiny, tinybert_mini, tinybert_small, tinybert_base
+
 MODELS = {
     # CNN models
     'resnet18': resnet18,
@@ -26,6 +29,15 @@ MODELS = {
     'swin_tiny': swin_tiny,
     'swin_small': swin_small,
     'swin_base': swin_base,
+
+    'tinygpt_nano': tinygpt_nano,
+    'tinygpt_micro': tinygpt_micro,
+    'tinygpt_mini': tinygpt_mini,
+    'tinygpt_small': tinygpt_small,
+    'tinybert_tiny': tinybert_tiny,
+    'tinybert_mini': tinybert_mini,
+    'tinybert_small': tinybert_small,
+    'tinybert_base': tinybert_base,
 }
 
 MODEL_TYPES = {
@@ -45,6 +57,15 @@ MODEL_TYPES = {
     'swin_tiny': 'transformer',
     'swin_small': 'transformer',
     'swin_base': 'transformer',
+
+    'tinygpt_nano': 'language_model',
+    'tinygpt_micro': 'language_model',
+    'tinygpt_mini': 'language_model',
+    'tinygpt_small': 'language_model',
+    'tinybert_tiny': 'language_model',
+    'tinybert_mini': 'language_model',
+    'tinybert_small': 'language_model',
+    'tinybert_base': 'language_model',
 }
 
 def create_model(name, config):

@@ -49,8 +49,13 @@ class Trainer:
         self.best_metric = 0.0
         self.patience_counter = 0
         
+
+        effective_batch = config.data.batch_size * config.training.gradient_accumulation_steps
         print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        print(f"Batch size: {config.data.batch_size} → Effective: {effective_batch} "
+              f"(accumulation: {config.training.gradient_accumulation_steps})")
         print(f"Switch iteration: {config.quantization.switch_iteration}")
+        
         
         # Print sparsification info
         if self.sparsifier:
@@ -81,60 +86,30 @@ class Trainer:
         
         for epoch in range(self.config.training.num_epochs):
             start_time = time.time()
-
-            # Apply sparsification at the specified epoch
             if (self.sparsifier and 
                 epoch == self.config.sparsification.apply_after_epoch and 
                 not hasattr(self.model, '_sparsified')):
                 
                 print(f"\n{'='*60}")
-                print(f"APPLYING SPARSIFICATION AT EPOCH {epoch}")
-                print(f"{'='*60}")
-
-
-            if (self.sparsifier and 
-                epoch == self.config.sparsification.apply_after_epoch and 
-                not hasattr(self.model, '_sparsified')):
-                
-                print(f"\n{'='*60}")
-                print(f"APPLYING SPARSIFICATION AT EPOCH {epoch}")
+                print(f"APPLYING ACTIVATION-AWARE SPARSIFICATION AT EPOCH {epoch}")
                 print(f"{'='*60}")
 
                 try:
-                    # Collect activation statistics first
-                    if hasattr(self.sparsifier, 'collect_activation_statistics'):
-                        self.sparsifier.collect_activation_statistics(self.model, self.train_loader)
-                    
-                    # Apply sparsification ONCE
-                    sparsification_results = self.sparsifier.apply(
+                    self.sparsifier.collect_activation_statistics(self.model, self.train_loader)
+                    sparsification_results = self.sparsifier.apply_sparsification(
                         self.model, 
                         self.config.sparsification.target_ratio
                     )
-                    
-                    # Log results
+
                     actual_sparsity = sparsification_results.get('actual_sparsity', 0.0)
                     method = sparsification_results.get('method', 'unknown')
                     
                     print(f"Sparsification complete: {actual_sparsity:.1%} actual sparsity")
                     print(f"Method used: {method}")
                     
-                    # Log detailed results if available
-                    if 'layer_results' in sparsification_results:
-                        layer_results = sparsification_results['layer_results']
-                        print(f"Sparsified {len(layer_results)} layers")
-                        
-                        # Print summary statistics
-                        if layer_results:
-                            avg_sparsity = sum(r.get('sparsity', 0) for r in layer_results) / len(layer_results)
-                            print(f"Average layer sparsity: {avg_sparsity:.1%}")
-                    
                     # Log to tensorboard
                     self.writer.add_scalar('Sparsification/ActualSparsity', actual_sparsity, epoch)
                     self.writer.add_scalar('Sparsification/TargetSparsity', self.config.sparsification.target_ratio, epoch)
-                    
-                    # Log method-specific metrics
-                    if 'threshold' in sparsification_results:
-                        self.writer.add_scalar('Sparsification/Threshold', sparsification_results['threshold'], epoch)
                     
                     # Mark as sparsified
                     self.model._sparsified = True
@@ -143,60 +118,45 @@ class Trainer:
                     
                     print(f"{'='*60}\n")
                     
-                    # Optionally reduce learning rate after sparsification
-                    if hasattr(self.config.sparsification, 'lr_reduction_factor'):
-                        lr_factor = self.config.sparsification.lr_reduction_factor
-                        for param_group in self.optimizer.param_groups:
-                            param_group['lr'] *= lr_factor
-                        print(f"Reduced learning rate by factor {lr_factor}")
-                
                 except Exception as e:
                     print(f"❌ Sparsification failed: {e}")
                     print("Continuing training without sparsification...")
                     import traceback
                     traceback.print_exc()
 
-            if (self.sparsifier and 
-                hasattr(self.sparsifier, 'adapt_targets') and
-                hasattr(self.model, '_sparsified')):
-                
-                self.sparsifier.adapt_targets(self.model, epoch)
-            
-            # Training and validation
             train_metrics = train_epoch(
                 self.model, self.train_loader, self.optimizer, 
                 epoch, self.switch_hook, self.writer, 
-                self.config.training.log_interval
+                self.config.training.log_interval, 
+                accumulation_steps=self.config.training.gradient_accumulation_steps
             )
             
             val_accuracy = validate(self.model, self.val_loader, epoch, self.writer)
             self.scheduler.step()
+
+            if (self.config.quantization.method in ["log", "adaptive_log"] and not hasattr(self.model, '_sparsified')):
+                log_quantization_stats_to_tensorboard(self.writer, self.model, epoch)
             
-            # Log metrics
             if self.config.quantization.method in ["log", "adaptive_log"]:
                 log_quantization_stats_to_tensorboard(self.writer, self.model, epoch)
             
             self.writer.add_scalar('Learning_Rate', self.scheduler.get_last_lr()[0], epoch)
             
-            # Track best performance
             is_best = val_accuracy > self.best_metric
             if is_best:
                 self.best_metric = val_accuracy
                 self.patience_counter = 0
                 
-                # Save sparsification info with best model
                 if hasattr(self.model, '_sparsification_results'):
                     print(f"New best model with sparsification: {val_accuracy:.2f}%")
             else:
                 self.patience_counter += 1
             
-            # Save checkpoint
             save_checkpoint(
                 self.model, self.optimizer, val_accuracy, epoch,
                 str(self.work_dir), is_best
             )
             
-            # Print epoch summary
             epoch_time = time.time() - start_time
             try:
                 hook_status = self.switch_hook.get_status()

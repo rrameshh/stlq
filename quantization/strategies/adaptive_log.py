@@ -40,8 +40,16 @@ class AdaptiveLogStrategy(QuantizationStrategy):
     
     def _quantize_weight_per_channel_adaptive(self, weight: torch.Tensor, config):
         """Per-channel quantization - NO SPECIAL ZERO HANDLING"""
+
+        if torch.rand(1) < 0.01:  # 1% chance to print (adjust as needed)
+            current_target = self.get_current_target()
+            original_target = self.target_second_word_ratio
+            print(f"DEBUG AdaptiveLog: Using target {current_target:.3f} (original: {original_target:.3f})")
+    
         
         weight_reshaped = weight.reshape(weight.shape[0], -1)  # [out_channels, rest]
+
+        
         a = weight_reshaped.abs().max(dim=1).values  # [out_channels]
 
         a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
@@ -82,6 +90,12 @@ class AdaptiveLogStrategy(QuantizationStrategy):
                 # quantile_level = 1.0 - self.target_second_word_ratio
                 quantile_level = 1.0 - self.get_current_target()
                 adaptive_threshold = torch.quantile(valid_errors, quantile_level)
+
+                if torch.rand(1) < 0.01:  # 1% chance to print
+                    current_target = self.get_current_target()
+                    actual_ratio = (err_magnitude > adaptive_threshold).float().mean().item()
+                    print(f"DEBUG Threshold: target={current_target:.3f}, quantile_level={quantile_level:.3f}, "
+                        f"threshold={adaptive_threshold:.6f}, actual_ratio={actual_ratio:.3f}")
                 
                 # Ensure threshold is reasonable (not too small)
                 adaptive_threshold = torch.maximum(
@@ -135,6 +149,12 @@ class AdaptiveLogStrategy(QuantizationStrategy):
 
     def _quantize_weight_per_tensor_adaptive(self, weight: torch.Tensor, config):
         """Per-tensor quantization - NO SPECIAL ZERO HANDLING"""
+
+
+        if torch.rand(1) < 0.01:  # 1% chance to print (adjust as needed)
+            current_target = self.get_current_target()
+            original_target = self.target_second_word_ratio
+            print(f"DEBUG AdaptiveLog: Using target {current_target:.3f} (original: {original_target:.3f})")
         
         a = weight.abs().max()
         a = torch.maximum(a, torch.tensor(config.eps, device=weight.device))
@@ -168,6 +188,14 @@ class AdaptiveLogStrategy(QuantizationStrategy):
                 # quantile_level = 1.0 - self.target_second_word_ratio
                 quantile_level = 1.0 - self.get_current_target()
                 adaptive_threshold = torch.quantile(valid_errors, quantile_level)
+
+                if torch.rand(1) < 0.01:  # 1% chance to print
+                    current_target = self.get_current_target()
+                    actual_ratio = (err_mag > adaptive_threshold).float().mean().item()
+                    print(f"DEBUG Threshold: target={current_target:.3f}, quantile_level={quantile_level:.3f}, "
+                        f"threshold={adaptive_threshold:.6f}, actual_ratio={actual_ratio:.3f}")
+            
+
                 adaptive_threshold = torch.maximum(
                     adaptive_threshold, 
                     torch.tensor(config.eps, device=weight.device)

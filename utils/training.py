@@ -69,10 +69,8 @@ def train_epoch(
     for i, (inputs, targets) in enumerate(train_loader):
         inputs, targets = inputs.to(model.device), targets.to(model.device)
         
-        # Forward pass
         outputs = model(inputs)
         
-        # Compute loss
         if isinstance(outputs, tuple) and len(outputs) == 3 and deit_loss_fn is not None:
             loss_dict = deit_loss_fn(outputs, targets)
             loss = loss_dict['total_loss']
@@ -135,7 +133,11 @@ def train_epoch(
         # Logging (adjust frequency for accumulation)
         if (i + 1) % (log_interval * accumulation_steps) == 0:
             iteration = epoch * len(train_loader) + i
-            _log_training_progress(epoch, i, len(train_loader), metrics, writer, iteration)
+            effective_step = (i + 1) // accumulation_steps
+            _log_training_progress(
+                epoch, effective_step, len(train_loader) // accumulation_steps, 
+                metrics, writer, iteration, accumulation_steps
+            )
             metrics.reset()
     
     # Handle remaining accumulated gradients (if batch count not divisible by accumulation_steps)
@@ -219,7 +221,6 @@ def save_checkpoint(
         'epoch': epoch,
     }
     
-    # Save best model separately
     if is_best:
         best_path = f'{save_dir}/best_model.pth'
         torch.save(state, best_path)
@@ -234,12 +235,17 @@ def _log_training_progress(
     total_batches: int, 
     metrics: TrainingMetrics, 
     writer: SummaryWriter,
-    iteration: int
+    iteration: int,
+    accumulation_steps: int = 1
 ) -> None:
-    """Log training progress to console and TensorBoard"""
-    print(f'Epoch [{epoch+1}], Batch [{batch_idx+1}/{total_batches}], '
-          f'Loss: {metrics.avg_loss:.4f}, Accuracy: {metrics.accuracy:.2f}%')
-    
-    # Log to TensorBoard
+    """Enhanced logging with gradient accumulation info"""
+    if accumulation_steps > 1:
+        print(f'Epoch [{epoch+1}], Step [{batch_idx}/{total_batches}] '
+              f'(acc_steps: {accumulation_steps}), '
+              f'Loss: {metrics.avg_loss:.4f}, Accuracy: {metrics.accuracy:.2f}%')
+    else:
+        print(f'Epoch [{epoch+1}], Batch [{batch_idx}/{total_batches}], '
+              f'Loss: {metrics.avg_loss:.4f}, Accuracy: {metrics.accuracy:.2f}%')
+
     writer.add_scalar('Training/Loss', metrics.avg_loss, iteration)
     writer.add_scalar('Training/Accuracy', metrics.accuracy, iteration)

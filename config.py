@@ -8,7 +8,6 @@ import torch
 @dataclass
 class DataConfig:
     dataset: str = "cifar10"
-    batch_size: int = 128
     num_workers: int = 4
     seq_len: int = 128  # For language models
     
@@ -36,6 +35,14 @@ class ModelConfig:
             }
             if self._dataset in dataset_classes:
                 self.num_classes = dataset_classes[self._dataset]
+
+        if self.name.startswith(('tinygpt', 'tinybert')):
+            if hasattr(self, '_dataset'):
+                if self._dataset in ['shakespeare', 'wikitext']:
+                    pass
+                elif self._dataset in ['imdb', 'sst2']:
+                    if self.vocab_size is None:
+                        self.vocab_size = 30522
 
 @dataclass
 class QuantizationConfig:
@@ -90,6 +97,35 @@ class TrainingConfig:
     weight_decay: float = 1e-4
     early_stop_patience: int = 10
     log_interval: int = 100
+    
+    batch_size: int = 128
+    gradient_accumulation_steps: int = 1
+    effective_batch_size: Optional[int] = None
+    
+    def __post_init__(self):
+        if self.gradient_accumulation_steps < 1:
+            raise ValueError("gradient_accumulation_steps must be >= 1")
+        if self.batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+            
+        if self.effective_batch_size is not None:
+            if self.effective_batch_size < self.batch_size:
+                print(f"Warning: effective_batch_size ({self.effective_batch_size}) is smaller than "
+                      f"batch_size ({self.batch_size}). Using accumulation_steps=1")
+                self.gradient_accumulation_steps = 1
+            else:
+                calculated_steps = self.effective_batch_size // self.batch_size
+                self.gradient_accumulation_steps = calculated_steps
+                print(f"Auto-calculated gradient_accumulation_steps: {self.gradient_accumulation_steps} "
+                      f"(batch_size: {self.batch_size}, effective: {self.effective_batch_size})")
+    
+    @property
+    def computed_effective_batch_size(self) -> int:
+        """Get the actual effective batch size"""
+        return self.batch_size * self.gradient_accumulation_steps
+        
+    
+    
     
 @dataclass
 class SystemConfig:

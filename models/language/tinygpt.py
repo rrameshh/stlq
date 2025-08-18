@@ -285,47 +285,74 @@ class TinyGPT(nn.Module):
 
 
 
-def create_tiny_gpt(variant="nano", quantization_method="linear", **kwargs):
-    
-    configs = {
-        "nano": {"dim": 192, "depth": 4, "num_heads": 3, "max_seq_len": 256},    # ~2M params
-        "micro": {"dim": 256, "depth": 6, "num_heads": 4, "max_seq_len": 512},   # ~8M params  
-        "mini": {"dim": 384, "depth": 6, "num_heads": 6, "max_seq_len": 1024},   # ~24M params
-        "small": {"dim": 512, "depth": 8, "num_heads": 8, "max_seq_len": 1024},  # ~52M params
-    }
-    
-    if variant not in configs:
-        raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
-    
-    device = kwargs.pop('device', 'cuda:0')
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
-    quantize_classifier = kwargs.pop('quantize_classifier', False)
-    
+def tinygpt_nano(main_config, **kwargs):
+    """TinyGPT-Nano - takes main config like vision models"""
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits=bits
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
-    config.quantize_classifier = quantize_classifier
+    config.quantize_classifier = False
     
-    model_config = configs[variant]
-    model_config.update(kwargs)
+    return TinyGPT(
+        vocab_size=main_config.model.vocab_size,
+        dim=192, depth=4, num_heads=3, max_seq_len=256,  # nano config
+        config=config,
+        **kwargs
+    )
+
+def tinygpt_micro(main_config, **kwargs):
+    """TinyGPT-Micro - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
     
-    return TinyGPT(config=config, **model_config)
+    return TinyGPT(
+        vocab_size=main_config.model.vocab_size,
+        dim=256, depth=6, num_heads=4, max_seq_len=512,   # micro config
+        config=config,
+        **kwargs
+    )
 
+def tinygpt_mini(main_config, **kwargs):
+    """TinyGPT-Mini - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return TinyGPT(
+        vocab_size=main_config.model.vocab_size,
+        dim=384, depth=6, num_heads=6, max_seq_len=1024,   # mini config
+        config=config,
+        **kwargs
+    )
 
-def tiny_gpt_nano(**kwargs):
-    return create_tiny_gpt("nano", **kwargs)
-
-def tiny_gpt_micro(**kwargs):
-    return create_tiny_gpt("micro", **kwargs)
-
-def tiny_gpt_mini(**kwargs):
-    return create_tiny_gpt("mini", **kwargs)
-
-def tiny_gpt_small(**kwargs):
-    return create_tiny_gpt("small", **kwargs)
+def tinygpt_small(main_config, **kwargs):
+    """TinyGPT-Small - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return TinyGPT(
+        vocab_size=main_config.model.vocab_size,
+        dim=512, depth=8, num_heads=8, max_seq_len=1024,  # small config
+        config=config,
+        **kwargs
+    )

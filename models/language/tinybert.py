@@ -333,57 +333,78 @@ class TinyBERT(nn.Module):
         
         return logits
 
-# TO FIX **
-
-def create_tiny_bert(variant="tiny", quantization_method="linear", **kwargs):
-    """
-    Create TinyBERT variants
-    """
-    
-    configs = {
-        # Based on TinyBERT paper configurations
-        "tiny": {"hidden_size": 128, "num_layers": 2, "num_heads": 2, "intermediate_size": 512},      # ~1M params
-        "mini": {"hidden_size": 256, "num_layers": 4, "num_heads": 4, "intermediate_size": 1024},     # ~4M params  
-        "small": {"hidden_size": 384, "num_layers": 4, "num_heads": 6, "intermediate_size": 1536},    # ~8M params
-        "base": {"hidden_size": 512, "num_layers": 6, "num_heads": 8, "intermediate_size": 2048},     # ~20M params
-    }
-    
-    if variant not in configs:
-        raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
-    
-    device = kwargs.pop('device', 'cuda:0')
-    threshold = kwargs.pop('threshold', 1e-5)
-    momentum = kwargs.pop('momentum', 0.1)
-    bits = kwargs.pop('bits', 8)
-    quantize_classifier = kwargs.pop('quantize_classifier', False)
-    
-    # Create quantization config
+def tinybert_tiny(main_config, **kwargs):
+    """TinyBERT-Tiny - takes main config"""
     config = QuantizationConfig(
-        method=quantization_method,
-        momentum=momentum,
-        device=device,
-        threshold=threshold,
-        bits=bits
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
     )
-    config.quantize_classifier = quantize_classifier
+    config.quantize_classifier = False
     
-    # Merge configs
-    model_config = configs[variant]
-    model_config.update(kwargs)
+    return TinyBERT(
+        vocab_size=30522,  # Standard BERT vocab
+        hidden_size=128, num_layers=2, num_heads=2, intermediate_size=512,  # tiny config
+        num_classes=main_config.model.num_classes,
+        config=config,
+        **kwargs
+    )
+
+def tinybert_mini(main_config, **kwargs):
+    """TinyBERT-Mini - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
     
-    return TinyBERT(config=config, **model_config)
+    return TinyBERT(
+        vocab_size=30522,
+        hidden_size=256, num_layers=4, num_heads=4, intermediate_size=1024,  # mini config
+        num_classes=main_config.model.num_classes,
+        config=config,
+        **kwargs
+    )
 
+def tinybert_small(main_config, **kwargs):
+    """TinyBERT-Small - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return TinyBERT(
+        vocab_size=30522,
+        hidden_size=384, num_layers=4, num_heads=6, intermediate_size=1536,  # small config
+        num_classes=main_config.model.num_classes,
+        config=config,
+        **kwargs
+    )
 
-# Convenient factory functions
-def tiny_bert_tiny(**kwargs):
-    return create_tiny_bert("tiny", **kwargs)
-
-def tiny_bert_mini(**kwargs):
-    return create_tiny_bert("mini", **kwargs)
-
-def tiny_bert_small(**kwargs):
-    return create_tiny_bert("small", **kwargs)
-
-def tiny_bert_base(**kwargs):
-    return create_tiny_bert("base", **kwargs)
-
+def tinybert_base(main_config, **kwargs):
+    """TinyBERT-Base - takes main config"""
+    config = QuantizationConfig(
+        method=main_config.quantization.method,
+        momentum=main_config.quantization.momentum,
+        device=main_config.system.device,
+        threshold=main_config.quantization.threshold,
+        bits=main_config.quantization.bits
+    )
+    config.quantize_classifier = False
+    
+    return TinyBERT(
+        vocab_size=30522,
+        hidden_size=512, num_layers=6, num_heads=8, intermediate_size=2048,  # base config
+        num_classes=main_config.model.num_classes,
+        config=config,
+        **kwargs
+    )

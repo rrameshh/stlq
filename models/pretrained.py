@@ -19,7 +19,8 @@ MODEL_TYPES = {
     'swin': ['swin_tiny', 'swin_small', 'swin_base'],
     
     # Language models (no pretrained)
-    'language': ['tinybert_tiny', 'tinybert_mini', 'tinybert_small', 'tinybert_base'],
+    'language': ['tinygpt_nano', 'tinygpt_micro', 'tinygpt_mini', 'tinygpt_small',
+                 'tinybert_tiny', 'tinybert_mini', 'tinybert_small', 'tinybert_base'],
 }
 
 
