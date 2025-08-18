@@ -50,9 +50,9 @@ class Trainer:
         self.patience_counter = 0
         
 
-        effective_batch = config.data.batch_size * config.training.gradient_accumulation_steps
+        effective_batch = config.training.batch_size * config.training.gradient_accumulation_steps
         print(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-        print(f"Batch size: {config.data.batch_size} → Effective: {effective_batch} "
+        print(f"Batch size: {config.training.batch_size} → Effective: {effective_batch} "
               f"(accumulation: {config.training.gradient_accumulation_steps})")
         print(f"Switch iteration: {config.quantization.switch_iteration}")
         
