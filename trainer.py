@@ -1,4 +1,4 @@
-# trainer.py - Fixed for QCA sparsification
+# trainer.py - Updated with storage integration
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
@@ -13,6 +13,8 @@ from utils.quantization_metrics import log_quantization_stats_to_tensorboard
 
 from models import create_model
 from models.pretrained import load_pretrained_weights
+from models.io import save_quantized_model  # NEW IMPORT
+from models.packaging import create_model_package  # NEW IMPORT
 
 # Updated import for sparsification
 try:
@@ -81,6 +83,68 @@ class Trainer:
         model.device = self.device
         return model
     
+    def save_enhanced_checkpoint(self, accuracy: float, epoch: int, is_best: bool = False):
+        """Enhanced checkpoint saving with both old and new formats"""
+        
+        # Add training metadata to model
+        self.model._best_accuracy = accuracy
+        self.model._epochs_trained = epoch + 1
+        
+        if is_best:
+            # 1. Save traditional checkpoint (for compatibility/resuming training)
+            traditional_checkpoint = {
+                'model': self.model.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'accuracy': accuracy,
+                'epoch': epoch,
+                'config': self.config.__dict__  # Save full config
+            }
+            
+            checkpoint_path = self.work_dir / "best_model.pth"
+            torch.save(traditional_checkpoint, checkpoint_path)
+            print(f" Traditional checkpoint saved: {checkpoint_path.name}")
+            
+            # Store model info for later packaging
+            self._best_model_info = {
+                'accuracy': accuracy,
+                'epoch': epoch,
+                'model_name': self._generate_model_name()
+            }
+            
+            return checkpoint_path
+        
+        else:
+            # Regular epoch checkpoint (traditional format)
+            checkpoint = {
+                'model': self.model.state_dict(),
+                'optimizer': self.optimizer.state_dict(),
+                'accuracy': accuracy,
+                'epoch': epoch,
+            }
+            checkpoint_path = self.work_dir / f"checkpoint_epoch_{epoch+1}.pth"
+            torch.save(checkpoint, checkpoint_path)
+            return checkpoint_path
+    
+    def _generate_model_name(self) -> str:
+        """Generate descriptive model name"""
+        name_parts = [
+            self.config.model.name,
+            self.config.quantization.method,
+            self.config.data.dataset
+        ]
+        
+        # Add sparsity info if applicable
+        if hasattr(self.model, '_sparsified'):
+            sparsity = self.model._sparsification_results.get('actual_sparsity', 0)
+            name_parts.append(f"sparse{int(sparsity*100)}")
+        
+        # Add accuracy
+        if hasattr(self.model, '_best_accuracy') and self.model._best_accuracy != 'unknown':
+            acc_str = f"{float(self.model._best_accuracy):.1f}".replace('.', 'p')
+            name_parts.append(f"acc{acc_str}")
+        
+        return "_".join(name_parts)
+    
     def train(self) -> float:
         print("Starting training...")
         
@@ -119,7 +183,7 @@ class Trainer:
                     print(f"{'='*60}\n")
                     
                 except Exception as e:
-                    print(f"❌ Sparsification failed: {e}")
+                    print(f" Sparsification failed: {e}")
                     print("Continuing training without sparsification...")
                     import traceback
                     traceback.print_exc()
@@ -134,9 +198,6 @@ class Trainer:
             val_accuracy = validate(self.model, self.val_loader, epoch, self.writer)
             self.scheduler.step()
 
-            if (self.config.quantization.method in ["log", "adaptive_log"] and not hasattr(self.model, '_sparsified')):
-                log_quantization_stats_to_tensorboard(self.writer, self.model, epoch)
-            
             if self.config.quantization.method in ["log", "adaptive_log"]:
                 log_quantization_stats_to_tensorboard(self.writer, self.model, epoch)
             
@@ -147,15 +208,16 @@ class Trainer:
                 self.best_metric = val_accuracy
                 self.patience_counter = 0
                 
+                # Use enhanced checkpoint saving
+                paths = self.save_enhanced_checkpoint(val_accuracy, epoch, is_best=True)
+                print(f"New best model saved with accuracy: {val_accuracy:.2f}%")
                 if hasattr(self.model, '_sparsification_results'):
-                    print(f"New best model with sparsification: {val_accuracy:.2f}%")
+                    sparsity = self.model._sparsification_results.get('actual_sparsity', 0)
+                    print(f"   Model sparsity: {sparsity:.1%}")
             else:
                 self.patience_counter += 1
-            
-            save_checkpoint(
-                self.model, self.optimizer, val_accuracy, epoch,
-                str(self.work_dir), is_best
-            )
+                # Save regular checkpoint
+                self.save_enhanced_checkpoint(val_accuracy, epoch, is_best=False)
             
             epoch_time = time.time() - start_time
             try:
@@ -183,9 +245,11 @@ class Trainer:
                 print(f"Early stopping after {epoch+1} epochs")
                 break
         
+        # Create final model package
+        self.finalize_training()
+        
         # Final summary
         print(f"\nTraining completed! Best accuracy: {self.best_metric:.2f}%")
-        
         if hasattr(self.model, '_sparsification_results'):
             results = self.model._sparsification_results
             print(f"Final model sparsity: {results.get('actual_sparsity', 0.0):.1%}")
@@ -194,15 +258,71 @@ class Trainer:
         self.writer.close()
         return self.best_metric
     
-    def get_model_info(self):
-        """Get detailed model information including sparsification status"""
-        info = {
-            'total_parameters': sum(p.numel() for p in self.model.parameters()),
-            'trainable_parameters': sum(p.numel() for p in self.model.parameters() if p.requires_grad),
-            'sparsified': hasattr(self.model, '_sparsified'),
-        }
+    def finalize_training(self):
+        """Create final model package for distribution (only at the end)"""
+        print(f"\n Creating final model package...")
         
-        if hasattr(self.model, '_sparsification_results'):
-            info.update(self.model._sparsification_results)
-        
-        return info
+        try:
+            # Load the best model from checkpoint
+            best_checkpoint = self.work_dir / "best_model.pth"
+            if not best_checkpoint.exists():
+                print("⚠️  No best model checkpoint found")
+                return None
+            
+            # Load best model state
+            checkpoint = torch.load(best_checkpoint, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model'])
+            
+            # Restore metadata
+            if hasattr(self, '_best_model_info'):
+                self.model._best_accuracy = self._best_model_info['accuracy']
+                self.model._epochs_trained = self._best_model_info['epoch'] + 1
+            
+            # Generate package directly (no intermediate files)
+            model_name = self._generate_model_name()
+            
+            # Save directly to package format
+            package_dir = self.work_dir / model_name
+            package_dir.mkdir(exist_ok=True)
+            
+            # Save both formats directly in package
+            quantized_path, fp32_path = save_quantized_model(
+                self.model,
+                self.config,
+                package_dir / "model.pth",  # This creates model_quantized.pth and model_fp32.pth
+                include_metadata=True
+            )
+            
+            # Create metadata file
+            from models.io import get_model_info
+            import json
+            info = get_model_info(quantized_path)
+            with open(package_dir / "model_info.json", 'w') as f:
+                json.dump(info, f, indent=2, default=str)
+            
+            print(f"   Final model package created: {package_dir.name}")
+            print(f"   Location: {package_dir}")
+            print(f"   Quantized: {info['file_size_mb']:.1f} MB")
+            print(f"   FP32: ~{info['total_parameters'] * 4 / (1024**2):.1f} MB")
+            
+            return package_dir
+                
+        except Exception as e:
+            print(f"⚠️  Could not create final package: {e}")
+            print("   Training checkpoint is still available in best_model.pth")
+            return None
+    
+    def get_final_structure(self) -> str:
+        structure = f"""
+Final Directory Structure:
+{self.work_dir}/
+├── tensorboard/                    # TensorBoard logs
+├── config.yaml                     # Training configuration
+├── best_model.pth                  # Training checkpoint (with optimizer state)
+├── {self._generate_model_name()}/               # Final model package
+│   ├── model_quantized.pth        # Quantized model (3-6x compressed)
+│   ├── model_fp32.pth             # FP32 model (universal compatibility)
+│   └── model_info.json            # Complete metadata
+└── checkpoint_epoch_*.pth          # Training checkpoints
+"""
+        return structure
