@@ -227,7 +227,9 @@ def _create_deit_variant(main_config, embed_dim, depth, num_heads, **kwargs):
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
     )
     config.quantize_classifier = False
     

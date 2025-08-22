@@ -35,25 +35,6 @@ def compute_second_word_ratio(model):
     
     return stats
 
-# def analyze_log_quantized_tensor(log_tensor, layer_name):
-
-#     stats = {
-#         'layer_name': layer_name,
-#         'total_weights': 0,
-#         'second_word_weights': 0,
-#         'zero_weights': 0,
-#         'ratio': 0.0
-#     }
-    
-#     if log_tensor.second_word_mask is not None:
-#         non_zero_mask = (log_tensor.q1 > 0)
-#         stats['total_weights'] = non_zero_mask.sum().item()
-#         stats['zero_weights'] = (log_tensor.q1 == 0).sum().item()
-#         stats['second_word_weights'] = log_tensor.second_word_mask.sum().item()
-#         if stats['total_weights'] > 0:
-#             stats['ratio'] = stats['second_word_weights'] / stats['total_weights']
-    
-#     return stats
 
 def analyze_log_quantized_tensor(log_tensor, layer_name):
     stats = {

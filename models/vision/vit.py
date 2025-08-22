@@ -405,64 +405,6 @@ class ViT(nn.Module):
         return x
 
 
-# # ==================== FACTORY FUNCTIONS ====================
-# def create_industry_standard_vit(
-#     variant="small", 
-#     quantization_method="linear", 
-#     **kwargs
-# ) -> ViT:
-#     """
-#     Create Vision Transformer with Explicit Flow Management
-#     """
-    
-#     configs = {
-#         "tiny": {"embed_dim": 192, "depth": 12, "num_heads": 3},
-#         "small": {"embed_dim": 384, "depth": 12, "num_heads": 6},
-#         "base": {"embed_dim": 768, "depth": 12, "num_heads": 12},
-#         "large": {"embed_dim": 1024, "depth": 24, "num_heads": 16},
-#         "huge": {"embed_dim": 1280, "depth": 32, "num_heads": 16}
-#     }
-    
-#     if variant not in configs:
-#         raise ValueError(f"Unknown variant: {variant}. Choose from {list(configs.keys())}")
-    
-#     # Extract config parameters
-#     device = kwargs.pop('device', 'cuda:0')
-#     threshold = kwargs.pop('threshold', 1e-5)
-#     momentum = kwargs.pop('momentum', 0.1)
-#     bits = kwargs.pop('bits', 8)
-#     quantize_classifier = kwargs.pop('quantize_classifier', False)
-    
-#     # Create quantization config
-#     config = QuantizationConfig(
-#         method=quantization_method,
-#         momentum=momentum,
-#         device=device,
-#         threshold=threshold,
-#         bits=bits
-#     )
-#     config.quantize_classifier = quantize_classifier
-    
-#     # Merge configs
-#     model_config = configs[variant]
-#     model_config.update(kwargs)
-    
-#     return ViT(config=config, **model_config)
-
-
-# # Convenient factory functions
-# def vit_tiny(**kwargs):
-#     return create_industry_standard_vit("tiny", **kwargs)
-
-# def vit_small(**kwargs):
-#     return create_industry_standard_vit("small", **kwargs)
-
-# def vit_base(**kwargs):
-#     return create_industry_standard_vit("base", **kwargs)
-
-# def vit_large(**kwargs):
-#     return create_industry_standard_vit("large", **kwargs)
-    
 
 def vit_tiny(main_config, **kwargs):
     """ViT-Tiny - takes main config"""
@@ -474,6 +416,7 @@ def vit_tiny(main_config, **kwargs):
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
+
     )
     config.quantize_classifier = False
     
@@ -495,6 +438,7 @@ def vit_small(main_config, **kwargs):
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
+
     )
     config.quantize_classifier = False
     
@@ -516,6 +460,7 @@ def vit_base(main_config, **kwargs):
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
+
     )
     config.quantize_classifier = False
     
@@ -537,6 +482,7 @@ def vit_large(main_config, **kwargs):
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits
+
     )
     config.quantize_classifier = False
     

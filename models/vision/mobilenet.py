@@ -265,7 +265,9 @@ def mobilenetv1(main_config, **kwargs):
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
     )
     return MobileNetV1(config=config, num_classes=main_config.model.num_classes, **kwargs)
 
@@ -276,6 +278,8 @@ def mobilenetv2(main_config, **kwargs):
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
     )
     return MobileNetV2(config=config, num_classes=main_config.model.num_classes, **kwargs)

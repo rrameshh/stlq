@@ -252,7 +252,9 @@ def resnet18(main_config, **kwargs):
         method=main_config.quantization.method,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
     )
     return ResNet(BasicBlock, [2, 2, 2, 2], config=config, 
                   num_classes=main_config.model.num_classes, **kwargs)
@@ -262,7 +264,9 @@ def resnet50(main_config, **kwargs):
         method=main_config.quantization.method,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
     )
     return ResNet(Bottleneck, [3, 4, 6, 3], config=config,
                   num_classes=main_config.model.num_classes, **kwargs)
