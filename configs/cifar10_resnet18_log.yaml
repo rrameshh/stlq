@@ -1,0 +1,29 @@
+data:
+  dataset: "cifar10"
+  batch_size: 128
+  num_workers: 4
+
+model:
+  name: "resnet18"
+  num_classes: 10
+  img_size: 32  # CIFAR-10 images are 32x32
+  pretrained: false
+
+quantization:
+  method: "log"
+  momentum: 0.1
+  bits: 8
+  switch_iteration: 500000
+  threshold: 100
+
+training:
+  num_epochs: 200
+  lr: 0.1
+  weight_decay: 0.0001
+  early_stop_patience: 10
+  log_interval: 100
+
+system:
+  device: "cuda:0"
+  work_dir: "./output_linear"
+  seed: 42

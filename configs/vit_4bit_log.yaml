@@ -1,0 +1,35 @@
+data:
+  dataset: "imagenet100"
+  batch_size: 16
+  num_workers: 4
+
+
+model:
+  name: "vit_small"
+  num_classes: 100
+  img_size: 224
+  pretrained: true
+
+
+quantization:
+  method: "adaptive_log"
+  momentum: 0.1
+  bits: 4
+  switch_iteration: 500000
+  threshold: 1
+  adaptive_threshold: true
+  target_second_word_ratio: 0.25
+  eps: 1e-8
+
+training:
+  num_epochs: 200
+  lr: 0.0001
+  weight_decay: 0.0001
+  early_stop_patience: 5
+  log_interval: 100
+
+
+system:
+  device: "cuda:0"
+  work_dir: "./second_word_vit"
+  seed: 42

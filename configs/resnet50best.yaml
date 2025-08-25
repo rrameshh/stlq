@@ -1,0 +1,48 @@
+# configs/resnet50_imagenet100_adaptive_log.yaml
+# ResNet-50 configuration adapted from ResNet-18
+
+data:
+  dataset: "imagenet100"
+  num_workers: 4  # Reduced to save memory
+
+model:
+  name: "resnet50"  # Changed from resnet18
+  num_classes: 100
+  img_size: 224
+  pretrained: true
+
+quantization:
+  method: "adaptive_log"
+  momentum: 0.1
+  bits: 8
+  threshold: 100  # Much lower threshold (was 1000, which is way too high)
+  adaptive_threshold: true
+  target_second_word_ratio: 0.97  # More reasonable target (was 0.97)
+  switch_iteration: 4000  # Reduced due to more steps per epoch with smaller batch
+  eps: 0.00000001  # Increased for better numerical stability
+
+sparsification:
+  enabled: false
+  method: "activation_aware"
+  target_ratio: 0.5
+  cost_penalty: 1.0
+  adaptation_interval: 5
+  initial_sw_target: 0.25
+  sw_learning_rate: 0.1
+  efficiency_threshold: 200.0
+  apply_after_epoch: 50
+  baseline_method: "magnitude"
+
+training:
+  num_epochs: 50
+  lr: 0.01  # Lower LR for ResNet-50 (more parameters)
+  weight_decay: 0.0001
+  early_stop_patience: 10
+  log_interval: 50  # More frequent logging due to more steps
+  batch_size: 16   # Smaller batch for ResNet-50 (more memory usage)
+  gradient_accumulation_steps: 16  # Higher accumulation to maintain effective batch size
+
+system:
+  device: "cuda:0"
+  work_dir: "./output_imagenet_resnet50_adaptive_log"
+  seed: 42

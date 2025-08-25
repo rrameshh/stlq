@@ -1,0 +1,32 @@
+data:
+  dataset: "cifar10"
+  batch_size: 128
+  num_workers: 4
+
+model:
+  name: "vit_small"
+  num_classes: 10
+  img_size: 32  # CIFAR-10 images are 32x32
+  pretrained: true
+
+quantization:
+  method: "adaptive_log"
+  momentum: 0.1
+  bits: 4
+  switch_iteration: 500000
+  threshold: 100
+  adaptive_threshold: true
+  target_second_word_ratio: 0.9
+  eps: 0.00000001
+
+training:
+  num_epochs: 5
+  lr: 0.0001
+  weight_decay: 0.0001
+  early_stop_patience: 10
+  log_interval: 100
+
+system:
+  device: "cuda:0"
+  work_dir: "./output_linear"
+  seed: 42

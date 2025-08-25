@@ -459,7 +459,9 @@ def swin_tiny(main_config, **kwargs):
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio
     )
     config.quantize_classifier = False
     
@@ -481,7 +483,9 @@ def swin_small(main_config, **kwargs):
         momentum=main_config.quantization.momentum,
         device=main_config.system.device,
         threshold=main_config.quantization.threshold,
-        bits=main_config.quantization.bits
+        bits=main_config.quantization.bits,
+        adaptive_threshold=main_config.quantization.adaptive_threshold,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio
     )
     config.quantize_classifier = False
     
@@ -505,7 +509,7 @@ def swin_base(main_config, **kwargs):
         threshold=main_config.quantization.threshold,
         bits=main_config.quantization.bits,
         adaptive_threshold=main_config.quantization.adaptive_threshold,
-        target_second_word_ratio=main_config.quantization.target_second_word_ratio,
+        target_second_word_ratio=main_config.quantization.target_second_word_ratio
     )
     config.quantize_classifier = False
     

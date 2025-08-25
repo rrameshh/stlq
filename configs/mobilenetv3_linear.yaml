@@ -1,0 +1,28 @@
+data:
+  dataset: "imagenet100"
+  batch_size: 32
+  num_workers: 4
+
+model:
+  name: "mobilenetv3_small"
+  num_classes: 100
+  img_size: 224
+  pretrained: true
+
+quantization:
+  method: "linear"
+  momentum: 0.1
+  bits: 8
+  switch_iteration: 5000
+
+training:
+  num_epochs: 200
+  lr: 0.01
+  weight_decay: 0.0001
+  early_stop_patience: 10
+  log_interval: 100
+
+system:
+  device: "cuda:0"
+  work_dir: "./output_mobilenetv3_linear"
+  seed: 42
